@@ -80,7 +80,7 @@ export function BasicPanel(p: DevPanelProps) {
             </IconButton>
           )}
           {p.sample && (
-            <Button small onClick={() => p.commit('Auto White Balance', (d) => Object.assign(d, autoWhiteBalance(p.sample!)))}>
+            <Button small title="Auto white balance" onClick={() => p.commit('Auto White Balance', (d) => Object.assign(d, autoWhiteBalance(p.sample!, d)))}>
               Auto
             </Button>
           )}
@@ -91,7 +91,7 @@ export function BasicPanel(p: DevPanelProps) {
       <div className="subhead">
         <span>Tone</span>
         {p.sample && (
-          <Button small onClick={() => p.commit('Auto Tone', (d) => Object.assign(d, autoTone(p.sample!, d)))}>
+          <Button small title="Auto tone: exposure, contrast, highlights, shadows, whites and blacks" onClick={() => p.commit('Auto Tone', (d) => Object.assign(d, autoTone(p.sample!, d)))}>
             Auto
           </Button>
         )}

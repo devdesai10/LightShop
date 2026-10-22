@@ -2,7 +2,7 @@
 
 A photo library, non-destructive RAW-style developer and layered image editor in one app. It pairs a Lightroom-style **Library** and **Develop** module with a Photoshop-style **Editor**, and runs in the browser or as a macOS desktop app.
 
-**Current version: 2.1**. See [What's new](#whats-new).
+**Current version: 2.2**. See [What's new](#whats-new).
 
 Your photos stay on your computer: LightShop works offline and stores its catalog locally.
 
@@ -19,7 +19,7 @@ Your photos stay on your computer: LightShop works offline and stores its catalo
 
 ### Develop
 - **Non-destructive editing on the GPU (WebGL2).** Edits are stored as settings and the original is never changed.
-- **Basic:** white balance (with eyedropper and Auto), exposure, contrast, highlights, shadows, whites, blacks, texture, clarity, dehaze, vibrance and saturation. Auto tone.
+- **Basic:** white balance (with eyedropper and Auto), exposure, contrast, highlights, shadows, whites, blacks, texture, clarity, dehaze, vibrance and saturation. Auto tone sets exposure, contrast, highlights, shadows, whites and blacks in one click.
 - **Tone Curve:** master and per-channel RGB curves.
 - **Color Mixer:** hue, saturation and luminance for 8 color ranges. In black-and-white mode it becomes a B&W mix.
 - **Color Grading:** shadow, midtone, highlight and global color wheels, with blending and balance.
@@ -126,6 +126,14 @@ build/, public/  App icons and web manifest
 - **Desktop app:** the Electron shell serves the built app from a private `app://` origin with a strict Content Security Policy. The page runs sandboxed with no Node.js access.
 
 ## What's new
+
+### 2.2: Better Auto Tone and Auto White Balance
+- **Auto Tone judges exposure by the scene:** it takes into account whether a scene is mostly dark or mostly bright, instead of pushing every photo to the same average. Badly under- or overexposed photos are corrected fully, while photos that are nearly right only get a nudge.
+- **Full tonal range without clipping:** contrast, highlights, shadows, whites and blacks are fitted together through Develop's own tone curve. The brightest detail lands just below white and the darkest just above black, with no new blown highlights.
+- **Faded and hazy photos** get their blacks and contrast back instead of just being darkened.
+- **Consistent:** the same photo shot a stop or two darker comes out nearly the same after Auto.
+- **Auto White Balance** combines four independent estimates of the light's color and uses their median, so foliage, sand or water is less likely to fool it. Blue casts are corrected almost fully, warm light keeps a little of its warmth, and photos that are already neutral are left alone.
+- Both Auto buttons only look at the part of the photo inside the crop, and analyze a larger, properly downsampled preview.
 
 ### 2.1: Trackpad navigation
 - **Pinch to zoom in Develop:** zooms in on the spot under your fingers, from Fit up to 1600%. Pinching out returns to Fit.

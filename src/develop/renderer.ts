@@ -631,13 +631,15 @@ export function computeHistogram(px: Uint8ClampedArray): Histogram {
 }
 
 function makeSample(src: TexImageSource & { width: number; height: number }): SourceSample {
-  const k = Math.min(1, 192 / Math.max(src.width, src.height));
+  // Used by Auto Tone / Auto White Balance and the white balance picker.
+  const k = Math.min(1, 256 / Math.max(src.width, src.height));
   const w = Math.max(1, Math.round(src.width * k));
   const h = Math.max(1, Math.round(src.height * k));
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
   const ctx = c.getContext('2d', { willReadFrequently: true })!;
+  ctx.imageSmoothingQuality = 'high'; // proper downsampling: aliasing would invent edges for Auto WB
   ctx.drawImage(src as CanvasImageSource, 0, 0, w, h);
   const d = ctx.getImageData(0, 0, w, h).data;
   const lin = new Float32Array(w * h * 3);
