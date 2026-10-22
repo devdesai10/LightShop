@@ -1,0 +1,10 @@
+{
+  "name": "LightShop",
+  "short_name": "LightShop",
+  "description": "Photo library, non-destructive developer and layered editor in one app.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#141416",
+  "theme_color": "#1b1b1d",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

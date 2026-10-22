@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Chime before shell commands that need approval",
+      "trigger": "PreToolUse",
+      "description": "Plays the macOS Glass sound when the agent is about to run a shell command that isn't in kiroAgent.trustedCommands, so you hear when an Allow prompt is likely waiting. Always exits 0, so it never blocks a tool.",
+      "matcher": "^(execute_bash|control_bash_process)$",
+      "action": {
+        "type": "command",
+        "command": "/usr/bin/python3 \"/Users/devandesai/Documents/LightShop/.kiro/hooks/approval-chime.py\" >/dev/null 2>&1; exit 0",
+        "timeout": 5
+      }
+    }
+  ]
+}
