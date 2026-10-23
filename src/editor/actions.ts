@@ -1,6 +1,7 @@
 // Editor commands used by menus, panels, shortcuts and tools. All are undoable via doc.commit().
 
 import { createCanvas, ctx2d } from '../lib/imageio';
+import { uid } from '../lib/util';
 import { toast } from '../state/app';
 import { ADJ_LABELS, Adjustment, adjustmentFilter } from './adjust';
 import { EditorDoc, Layer, PixelLayer, RasterLayer, Rect, isPixel, makeSelection, renderText } from './doc';
@@ -551,6 +552,96 @@ export function cropDoc(doc: EditorDoc, r: Rect, label = 'Crop') {
 export function cropToSelection(doc: EditorDoc) {
   if (!doc.selection) return toast('Make a selection first');
   cropDoc(doc, doc.selection.bounds, 'Crop to Selection');
+}
+
+/** A pixel layer's new canvas and position after a canvas change. */
+export interface LayerPlacement {
+  canvas: HTMLCanvasElement;
+  x: number;
+  y: number;
+  /** Type layers become pixels (their canvas was resampled). */
+  rasterize: boolean;
+}
+
+/**
+ * Gives the document a new size, layer canvases/positions and masks (worked out beforehand, see expand.ts),
+ * plus an optional new top layer, as one undoable step.
+ */
+export function applyCanvasChange(
+  doc: EditorDoc,
+  label: string,
+  w: number,
+  h: number,
+  placements: Map<Layer, LayerPlacement>,
+  masks: Map<Layer, HTMLCanvasElement>,
+  add: RasterLayer | null,
+) {
+  doc.commit(label, () => {
+    doc.width = w;
+    doc.height = h;
+    for (const l of doc.layers) {
+      const p = placements.get(l);
+      if (p && isPixel(l)) {
+        l.canvas = p.canvas;
+        l.x = p.x;
+        l.y = p.y;
+        if (p.rasterize && l.kind === 'text') (l as unknown as RasterLayer).kind = 'raster';
+      }
+      const m = masks.get(l);
+      if (m) l.mask = m;
+    }
+    doc.selection = null;
+    if (add) {
+      doc.layers = [...doc.layers, add];
+      doc.activeId = add.id;
+      doc.editMask = false;
+    }
+  });
+}
+
+/**
+ * Adds a copy of `layer` from document `src` to `doc` (one undoable step). Pixel layers get their top-left at
+ * (x, y); an adjustment layer's mask is placed as if the source canvas's top-left were at (x, y).
+ */
+export function importLayer(doc: EditorDoc, src: EditorDoc, layer: Layer, x: number, y: number, index?: number) {
+  const copy = { ...structuredCloneLayer(layer), id: uid('l'), name: importedName(doc, src, layer.name) } as Layer;
+  const ox = isPixel(layer) ? layer.x : 0;
+  const oy = isPixel(layer) ? layer.y : 0;
+  if (isPixel(copy)) {
+    copy.x = x;
+    copy.y = y;
+  }
+  if (layer.mask) {
+    // Masks are document-sized: move this one with the layer, revealing everything it didn't cover.
+    const dx = x - ox;
+    const dy = y - oy;
+    const m = createCanvas(doc.width, doc.height);
+    const g = ctx2d(m);
+    g.fillStyle = '#fff';
+    g.fillRect(0, 0, m.width, m.height);
+    g.clearRect(dx, dy, src.width, src.height);
+    g.drawImage(layer.mask, dx, dy);
+    copy.mask = m;
+  }
+  insertLayer(doc, copy, 'Drag Layer', index);
+}
+
+/** Adds pixels dragged from document `src` as a new layer with its top-left at (x, y). */
+export function importPixels(doc: EditorDoc, src: EditorDoc, canvas: HTMLCanvasElement, x: number, y: number, name: string, index?: number) {
+  insertLayer(doc, doc.newRaster(importedName(doc, src, name), canvas, x, y), 'Drag Layer', index);
+}
+
+/**
+ * Name for a layer dragged in from `src`: its own, except that a Background (every opened photo has one)
+ * takes the name of the document it came from. Numbered when `doc` already has a layer by that name.
+ */
+function importedName(doc: EditorDoc, src: EditorDoc, name: string) {
+  const base = name === 'Background' && src !== doc ? src.name || 'Layer' : name;
+  const names = new Set(doc.layers.map((l) => l.name));
+  if (!names.has(base)) return base;
+  let n = 2;
+  while (names.has(`${base} ${n}`)) n++;
+  return `${base} ${n}`;
 }
 
 /** Updates a text layer's properties (re-renders its pixels). */

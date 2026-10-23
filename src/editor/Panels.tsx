@@ -6,6 +6,7 @@ import { ADJ_LABELS, AdjType, Adjustment, defaultAdjustment } from './adjust';
 import { AdjustmentEditor } from './AdjustmentEditor';
 import { addAdjustmentLayer, addLayerMask, deleteLayer, duplicateLayer, moveLayer, newLayer, setLayerProps, updateText } from './actions';
 import { BLEND_MODES, BlendMode, EditorDoc, Layer } from './doc';
+import { beginRowDrag, dropInto, isLayerDrag, layerDrag } from './layerDrag';
 import { editor } from './session';
 
 function LayerThumb({ doc, layer, mask }: { doc: EditorDoc; layer: Layer; mask?: boolean }) {
@@ -40,8 +41,8 @@ const ADJ_TYPES = Object.keys(ADJ_LABELS) as AdjType[];
 export function LayersPanel({ doc }: { doc: EditorDoc }) {
   useEmitter(doc);
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+  const dragged = layerDrag.use((s) => s.payload);
   const active = doc.active;
   const layersTop = [...doc.layers].reverse();
   return (
@@ -91,7 +92,7 @@ export function LayersPanel({ doc }: { doc: EditorDoc }) {
         {layersTop.map((l) => (
           <li
             key={l.id}
-            className={cx('layer', l.id === doc.activeId && 'active', overId === l.id && dragId !== l.id && 'drag-over')}
+            className={cx('layer', l.id === doc.activeId && 'active', overId === l.id && dragged && dragged.layer !== l && 'drag-over')}
             onClick={() => {
               if (doc.activeId !== l.id) {
                 doc.activeId = l.id;
@@ -100,25 +101,31 @@ export function LayersPanel({ doc }: { doc: EditorDoc }) {
               }
             }}
             draggable
-            onDragStart={(e) => {
-              setDragId(l.id);
-              e.dataTransfer.effectAllowed = 'move';
-              e.dataTransfer.setData('text/plain', l.id);
-            }}
+            title="Drag to reorder, or onto another document's tab to copy it there"
+            onDragStart={(e) => beginRowDrag(e, doc, l)}
             onDragOver={(e) => {
-              if (!dragId) return;
+              const p = layerDrag.get().payload;
+              if (!p || !isLayerDrag(e)) return;
               e.preventDefault();
+              e.dataTransfer.dropEffect = p.src === doc ? 'move' : 'copy';
               setOverId(l.id);
             }}
-            onDragEnd={() => {
-              setDragId(null);
-              setOverId(null);
+            onDragLeave={(e) => {
+              const to = e.relatedTarget as Node | null;
+              if (!to || !e.currentTarget.contains(to)) setOverId((id) => (id === l.id ? null : id));
             }}
+            onDragEnd={() => setOverId(null)}
             onDrop={(e) => {
-              e.preventDefault();
-              if (dragId && dragId !== l.id) moveLayer(doc, doc.indexOf(dragId), doc.indexOf(l.id));
-              setDragId(null);
+              const p = layerDrag.get().payload;
               setOverId(null);
+              if (!p || !isLayerDrag(e)) return;
+              e.preventDefault();
+              e.stopPropagation();
+              // Within the document this reorders; a layer from another document is copied in above this one.
+              if (p.src === doc) {
+                const from = p.layer ? doc.indexOf(p.layer.id) : -1;
+                if (from >= 0 && p.layer !== l) moveLayer(doc, from, doc.indexOf(l.id));
+              } else dropInto(doc, p, 'auto', doc.indexOf(l.id) + 1);
             }}
             role="option"
             aria-selected={l.id === doc.activeId}

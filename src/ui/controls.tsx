@@ -235,6 +235,7 @@ export function Modal({
   footer,
   width = 420,
   className,
+  closeOnBackdrop = true,
 }: {
   title: string;
   children: ReactNode;
@@ -242,6 +243,8 @@ export function Modal({
   footer?: ReactNode;
   width?: number;
   className?: string;
+  /** Clicking outside the sheet closes it (off for sheets that cancel work). */
+  closeOnBackdrop?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -256,7 +259,7 @@ export function Modal({
     return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
   return (
-    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-backdrop" onMouseDown={(e) => closeOnBackdrop && e.target === e.currentTarget && onClose()}>
       <div className={cx('modal', className)} style={{ width }} ref={ref} role="dialog" aria-modal="true" aria-label={title}>
         <header className="modal-head">
           <h2>{title}</h2>

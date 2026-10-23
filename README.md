@@ -2,7 +2,7 @@
 
 A photo library, non-destructive RAW-style developer and layered image editor in one app. It pairs a Lightroom-style **Library** and **Develop** module with a Photoshop-style **Editor**, and runs in the browser or as a macOS desktop app.
 
-**Current version: 2.3**. See [What's new](#whats-new).
+**Current version: 2.4**. See [What's new](#whats-new).
 
 Your photos stay on your computer: LightShop works offline and stores its catalog locally.
 
@@ -29,7 +29,7 @@ Your photos stay on your computer: LightShop works offline and stores its catalo
 - **Detail:** sharpening and noise reduction.
 - **Effects:** post-crop vignette and film grain.
 - **Masks:** up to 8 radial and linear gradient masks, each with its own exposure, contrast, highlights, shadows, temperature, tint, saturation and clarity.
-- **Crop & straighten:** aspect presets, angle, 90° rotation and flips.
+- **Crop & straighten:** aspect presets, angle, 90° rotation and flips. **Expand in Editor** opens the photo in the Editor's Crop tool, set to grow it to a screen size of your choice.
 - **Touch Up:** Heal, Clone and Red Eye. Click a blemish or paint over a larger area, and LightShop picks a matching source area. You can move or resize spots and pick a new source.
 - **Presets:** 15 built-in presets, plus your own. Lightroom `.xmp` and `.lrtemplate` presets can be imported, and the current look can be exported as `.xmp`.
 - **History:** a full history list, before/after view, and copy/paste of settings between photos.
@@ -38,6 +38,8 @@ Your photos stay on your computer: LightShop works offline and stores its catalo
 ### Editor
 - Pixel, type and adjustment layers, with layer masks, opacity and 17 blend modes.
 - **Tools:** Move, Marquee, Lasso, Magic Wand, Crop, Eyedropper, Spot Healing Brush, Brush, Clone Stamp, Eraser, Gradient, Paint Bucket, Type, Shape, Hand and Zoom.
+- **Crop and expand:** the crop box can reach past the image to make the canvas bigger, for example to turn an iPhone wallpaper into a Mac wallpaper. **Expand to** sizes the result for a Mac display, a common desktop resolution or an iPhone. The new area can be filled with Content-Aware, Blurred Photo, Extend Edges, Mirror or a color, or left transparent. The fill goes on its own layer.
+- **Drag layers between documents:** drag with the Move tool, or drag a row in the Layers panel, onto another document's tab to copy the layer or selected pixels into that document.
 - **Adjustments:** 13 types, applied directly or as adjustment layers: Brightness/Contrast, Levels, Curves, Exposure, Hue/Saturation, Color Balance, Black & White, Photo Filter, Channel Mixer, Invert, Posterize, Threshold and Gradient Map.
 - **Filters:**
   - Blur: Gaussian, Motion
@@ -105,7 +107,9 @@ src/
   develop/       Develop module: WebGL2 renderer and shaders, settings and presets,
                  Touch Up (retouch.ts), masks, crop, Navigator, history
   editor/        Editor module: document model and undo history, tools, layers,
-                 adjustments, filters, menus, Develop → Editor sync (session.ts)
+                 adjustments, filters, menus, Develop → Editor sync (session.ts),
+                 crop Expand (expand.ts) and its fills (inpaint.ts, fillWorker.ts),
+                 dragging layers between documents (layerDrag.ts)
   lib/           Image decoding, EXIF, RAW previews, PSD, XMP presets, color math,
                  date labels and calendar math, trackpad gestures, IndexedDB
   state/         App store: catalog, photos, collections, presets
@@ -127,9 +131,27 @@ build/, public/  App icons and web manifest
 
   A preview of up to 2560 px is used for editing. The full-resolution image loads when you zoom in past it, and for export.
 - **Editor:** a Canvas 2D compositor handles masks, blend modes and adjustment layers. Undo history has a memory budget. PSD reading and writing are implemented from Adobe's published file-format specification.
+- **Content-Aware fill:** PatchMatch nearest-neighbour search with iterative patch voting, run coarse to fine on an image pyramid (after Barnes et al., 2009, and Wexler et al., 2007). A layout term favours patches from the same rows or columns as the new pixels. It runs in a Web Worker, so the app stays responsive.
 - **Desktop app:** the Electron shell serves the built app from a private `app://` origin with a strict Content Security Policy. The page runs sandboxed with no Node.js access.
 
 ## What's new
+
+### 2.4: Expand the canvas and drag layers between documents
+- **Expand with the Crop tool (C):** drag the crop box past the edges of the image, or pick a size under **Expand to**, and press Enter. An iPhone wallpaper becomes a desktop one with the photo centred at full height and the sides filled in.
+- **Sizes:** your current display, every Mac display (MacBook Air 13″ and 15″, MacBook Pro 14″ and 16″, iMac 24″, Studio Display, Pro Display XDR), 4K, 1440p, 1080p, 16:10 and ultrawide desktops, and current iPhones. The result is exactly that many pixels.
+- **Fills for the new area:**
+  - **Content-Aware** (the default) continues the scene with patches matched from the photo, taken from the same height beside it, so skies stay up and ground stays down.
+  - **Blurred Photo** puts an enlarged, blurred copy of the photo behind it.
+  - **Extend Edges** carries the edge colors outward, softer the further they go.
+  - **Mirror** reflects the photo at its edges.
+  - **Color** uses a color you pick, and **Transparent** leaves the area empty.
+- **Preview before you apply:** the crop box shows a quick preview of the fill. Box edges snap to the image's edges (hold ⌘ to place them freely). The view zooms out to fit the box.
+- **Fill layer:** the fill goes on its own layer above the photo, so you can hide, retouch or delete it. The whole change is one undo step, **Expand Canvas**. Slow fills show progress and can be cancelled.
+- **From Develop:** the Crop & Straighten panel (R) has an **Expand** section. Choose a size and fill, then click **Expand in Editor…** to open the photo in the Editor with the box set up.
+- **New crop ratios in the Editor:** Original, 16:10 and 9:16. Changing the ratio reshapes the box around its centre.
+- **Drag layers between documents:** with the Move tool (V), drag onto another document's tab and hold for a moment. That document opens, and you can drop the copy exactly where you want it. Releasing on the tab itself drops it in the centre, or in the same place when both documents are the same size. With a selection, only the selected pixels are copied.
+- **Drag from the Layers panel:** drag a layer's row onto another tab or another document's canvas to copy it. Dragging within the same document still reorders layers.
+- Copies dragged between documents never change the original, and each drop is one undo step, **Drag Layer**. A dragged Background layer is named after the document it came from. Esc cancels a drag.
 
 ### 2.3: Events, dates and calendar
 - **Group by event:** the Library grid is now split into events, photos taken close together in time, each under a header with its date, time span and photo count. Choose when a new event starts, from a 1 hour to a 1 day gap. Group by day, month or year instead, or turn grouping off.
@@ -185,6 +207,8 @@ build/, public/  App icons and web manifest
 - Editor documents stay in memory until you choose **Save to Library**. LightShop warns before you quit with unsaved documents.
 - Pinch zoom in Safari is handled but untested. The desktop app and Chromium browsers (Chrome, Brave, Edge) are tested.
 - Events are worked out from capture times only, not locations. Photos without an EXIF date use the file's modified time. Named events are stored as collections.
+- Content-Aware fills take a few seconds for a laptop-sized wallpaper and up to about 15 seconds at Pro Display XDR size (6016 × 3384) on an M1. Results above 24 megapixels are filled at a lower resolution and enlarged, and the Crop tool's largest result is 64 megapixels.
+- Content-Aware works best on landscapes, skies and textures. It copies patches of the photo rather than inventing new content, so faces, text and other distinct objects at the edges can come out repeated or distorted. Blurred Photo is the safer choice for those.
 
 ---
 

@@ -13,10 +13,12 @@ import { EditorDoc, TextProps, textFont } from './doc';
 import { Dialogs, openDialog, ui } from './Dialogs';
 import { MenuBar } from './Menus';
 import { ColorPanel, FONTS, HistoryPanel, LayersPanel, PropertiesPanel } from './Panels';
-import { ToolId, activeDoc, closeDoc, editor, openFilesInEditor, saveDocToLibrary, setOpts, showDoc } from './session';
-import { TOOLS, Tool, ToolCtx, ToolEvent, applyCrop, hand, hasPendingCrop } from './tools';
+import { ToolId, closeDoc, editor, openFilesInEditor, saveDocToLibrary, setOpts, showDoc } from './session';
+import { TOOLS, Tool, ToolCtx, ToolEvent, applyCrop, hand, hasPendingCrop, isMoving, selectTool, toolCtx } from './tools';
 import { dpr, fitView, getView, refit, setActualPixels, setView, setViewportSize, zoomBy } from './viewState';
 import { attachViewGestures } from '../lib/gestures';
+import { CropOptions, ExpandProgress } from './CropOptions';
+import { carryMoveTo, clearTabHover, drawDropPreview, dropMoveOnTab, hoverTab, layerDrag, rowDragLeave, rowDragOver, rowDrop, tabAt, tabDragProps } from './layerDrag';
 
 const TOOL_LIST: { id: ToolId; label: string; key: string; icon: React.ReactNode }[] = [
   { id: 'move', label: 'Move', key: 'V', icon: <Move size={17} /> },
@@ -39,15 +41,7 @@ const TOOL_LIST: { id: ToolId; label: string; key: string; icon: React.ReactNode
 
 const KEY_TOOLS: Record<string, ToolId> = { v: 'move', m: 'marquee', l: 'lasso', w: 'wand', c: 'crop', i: 'eyedropper', j: 'heal', b: 'brush', s: 'clone', e: 'eraser', g: 'gradient', t: 'text', u: 'shape', h: 'hand', z: 'zoom' };
 
-function setTool(t: ToolId) {
-  const doc = activeDoc();
-  const cur = editor.get().tool;
-  if (cur !== t && doc) {
-    TOOLS[cur].deactivate?.({ doc, st: editor.get(), view: getView(doc), setView: (v, a) => setView(doc, v, a), redraw: () => doc.onRender.emit(), editText: () => {}, hover: null });
-    doc.onRender.emit();
-  }
-  editor.set({ tool: t });
-}
+const setTool = selectTool;
 
 // ---------------------------------------------------------------- Toolbar
 function Toolbar() {
@@ -242,34 +236,15 @@ function OptionsBar({ doc }: { doc: EditorDoc | null }) {
       );
       break;
     case 'crop':
-      body = (
-        <>
-          <select
-            value={o.crop.aspect === null ? '' : String(o.crop.aspect)}
-            onChange={(e) => setOpts('crop', { aspect: e.target.value ? parseFloat(e.target.value) : null })}
-            aria-label="Crop ratio"
-          >
-            <option value="">Free ratio</option>
-            <option value="1">1 : 1</option>
-            <option value={String(4 / 5)}>4 : 5</option>
-            <option value={String(3 / 2)}>3 : 2</option>
-            <option value={String(2 / 3)}>2 : 3</option>
-            <option value={String(16 / 9)}>16 : 9</option>
-          </select>
-          <span className="muted">Drag on the canvas, adjust handles, then press Enter.</span>
-          {doc && hasPendingCrop() && (
-            <Button small primary onClick={() => applyCrop({ doc, st: editor.get(), view: getView(doc), setView: () => refit(doc), redraw: () => doc.onRender.emit(), editText: () => {}, hover: null })}>
-              Apply crop
-            </Button>
-          )}
-        </>
-      );
+      body = <CropOptions doc={doc} />;
       break;
     case 'move':
       body = (
         <>
           <Check label="Auto-select layer" value={o.move.autoSelect} onChange={(autoSelect) => setOpts('move', { autoSelect })} />
-          <span className="muted">Drag to move; with a selection, moves the selected pixels (Alt duplicates). Arrow keys nudge.</span>
+          <span className="muted">
+            Drag to move; with a selection, moves the selected pixels (Alt duplicates). Arrow keys nudge. Drag onto another document's tab to copy it there.
+          </span>
         </>
       );
       break;
@@ -397,6 +372,8 @@ function Viewport({ doc }: { doc: EditorDoc }) {
       g.strokeRect(x + al.x * v.zoom * d + 0.5, y + al.y * v.zoom * d + 0.5, al.canvas.width * v.zoom * d, al.canvas.height * v.zoom * d);
       g.restore();
     }
+    // a layer being dragged in from another document
+    drawDropPreview(g, doc, x, y, v.zoom * d);
     g.setTransform(d, 0, 0, d, 0, 0);
     const t = spaceDown.current ? hand : TOOLS[editor.get().tool];
     t.overlay?.(g, ctxFor());
@@ -426,9 +403,11 @@ function Viewport({ doc }: { doc: EditorDoc }) {
 
   useEffect(() => {
     const u1 = doc.onRender.subscribe(schedule);
+    const u2 = layerDrag.subscribe(schedule);
     schedule();
     return () => {
       u1();
+      u2();
     };
   });
 
@@ -510,21 +489,32 @@ function Viewport({ doc }: { doc: EditorDoc }) {
     t.down?.(toEvent(e), ctxFor());
     schedule();
   };
+  const lastClient = useRef({ x: 0, y: 0 });
   const onMove = (e: React.PointerEvent) => {
     const ev = toEvent(e);
     hover.current = { x: ev.x, y: ev.y };
+    lastClient.current = { x: e.clientX, y: e.clientY };
     const t = dragging.current;
     if (t) {
       const coalesced = (e.nativeEvent as PointerEvent).getCoalescedEvents?.() ?? [];
       if (coalesced.length > 1 && t !== hand) for (const ce of coalesced) t.move?.(toEvent(ce), ctxFor());
       else t.move?.(ev, ctxFor());
+      // Moving onto another document's tab: after a moment that document opens and the drag carries a copy.
+      if (t === TOOLS.move && isMoving()) {
+        const tab = tabAt(e.clientX, e.clientY);
+        if (tab && tab !== doc.id) hoverTab(tab, () => isMoving() && carryMoveTo(doc, tab, lastClient.current));
+        else clearTabHover();
+      }
     } else if (editor.get().tool === 'lasso' && editor.get().opts.lasso.polygonal) TOOLS.lasso.move?.(ev, ctxFor());
     schedule();
   };
   const onUp = (e: React.PointerEvent) => {
     const t = dragging.current;
     dragging.current = null;
-    t?.up?.(toEvent(e), ctxFor());
+    clearTabHover();
+    const tab = t === TOOLS.move && isMoving() ? tabAt(e.clientX, e.clientY) : null;
+    if (tab && tab !== doc.id) dropMoveOnTab(doc, tab);
+    else t?.up?.(toEvent(e), ctxFor());
     setCursor((spaceDown.current ? hand : TOOLS[editor.get().tool]).cursor(ctxFor()));
     schedule();
   };
@@ -571,8 +561,14 @@ function Viewport({ doc }: { doc: EditorDoc }) {
       <div
         className="viewport"
         ref={wrapRef}
-        onDragOver={(e) => e.dataTransfer.types.includes('Files') && e.preventDefault()}
+        data-doc-view={doc.id}
+        onDragOver={(e) => {
+          if (rowDragOver(e, doc)) return;
+          if (e.dataTransfer.types.includes('Files')) e.preventDefault();
+        }}
+        onDragLeave={rowDragLeave}
         onDrop={async (e) => {
+          if (rowDrop(e, doc)) return;
           const files = Array.from(e.dataTransfer.files);
           if (!files.length) return;
           e.preventDefault();
@@ -717,8 +713,8 @@ function useEditorShortcuts(doc: EditorDoc | null) {
         setOpts(key, { opacity: k === '0' ? 1 : +k / 10 });
         return;
       }
-      if (k === 'enter' && editor.get().tool === 'crop' && hasPendingCrop()) {
-        applyCrop({ doc, st: editor.get(), view: getView(doc), setView: () => refit(doc), redraw: () => doc.onRender.emit(), editText: () => {}, hover: null });
+      if (k === 'enter' && editor.get().tool === 'crop' && hasPendingCrop(doc)) {
+        applyCrop(toolCtx(doc));
         return;
       }
       if (k === 'm' && e.shiftKey) return setOpts('marquee', { shape: editor.get().opts.marquee.shape === 'rect' ? 'ellipse' : 'rect' });
@@ -765,7 +761,16 @@ export function EditorView() {
         <div className="ed-center">
           <div className="doc-tabs" role="tablist" aria-label="Open documents">
             {docs.map((d) => (
-              <div key={d.id} className={cx('doc-tab', d.id === activeId && 'active')} onClick={() => showDoc(d)} role="tab" aria-selected={d.id === activeId} title={d.devLink ? 'Linked to Develop: edits made there show up here' : undefined}>
+              <div
+                key={d.id}
+                className={cx('doc-tab', d.id === activeId && 'active')}
+                onClick={() => showDoc(d)}
+                role="tab"
+                aria-selected={d.id === activeId}
+                data-doc-tab={d.id}
+                {...tabDragProps(d.id)}
+                title={d.devLink ? 'Linked to Develop: edits made there show up here' : 'Drag a layer here (Move tool or Layers panel) to copy it into this document'}
+              >
                 {d.name}
                 {d.dirty ? ' •' : ''}
                 <button
@@ -828,7 +833,7 @@ export function EditorView() {
                 </select>
               </div>
               <PropertiesPanel doc={doc} />
-              <LayersPanel doc={doc} />
+              <LayersPanel doc={doc} key={doc.id} />
               <HistoryPanel doc={doc} />
             </>
           )}
@@ -836,6 +841,7 @@ export function EditorView() {
         </aside>
       </div>
       <Dialogs doc={doc} />
+      <ExpandProgress />
     </div>
   );
 }

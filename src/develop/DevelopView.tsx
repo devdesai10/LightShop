@@ -11,7 +11,10 @@ import { Button, IconButton, Panel, Segmented, Slider, Stars, cx } from '../ui/c
 import { ExportDialog } from '../ui/ExportDialog';
 import { HistogramView } from '../ui/widgets';
 import { Thumb, useVisiblePhotos } from '../library/LibraryView';
-import { openPhotoInEditor } from '../editor/session';
+import { editor, openPhotoInEditor, setOpts } from '../editor/session';
+import { ExpandFill, FILLS, displayPreset } from '../editor/expand';
+import { SizePresetOptions } from '../editor/CropOptions';
+import { expandPhotoInEditor } from '../editor/tools';
 import { AdjustmentPanels, DevPanelProps } from './DevelopPanels';
 import { HistoryPanel, NavigatorPanel, PresetsPanel } from './LeftPanels';
 import { sampleAt } from './auto';
@@ -1029,10 +1032,24 @@ function DevelopWorkspace() {
             <Pipette size={16} />
           </IconButton>
         </div>
-        {tool === 'crop' && <CropPanel s={s} wo={orientedSizeOf(img.current, s).w} ho={orientedSizeOf(img.current, s).h} onDone={() => setTool('none')} onCancel={() => {
-          if (cropStart.current) liveSettings(cropStart.current);
-          dev.set({ tool: 'none' });
-        }} />}
+        {tool === 'crop' && (
+          <CropPanel
+            s={s}
+            wo={orientedSizeOf(img.current, s).w}
+            ho={orientedSizeOf(img.current, s).h}
+            onDone={() => setTool('none')}
+            onCancel={() => {
+              if (cropStart.current) liveSettings(cropStart.current);
+              dev.set({ tool: 'none' });
+            }}
+            onExpand={(presetId, fill) => {
+              if (!photoId) return;
+              setTool('none');
+              flushDevelop();
+              void expandPhotoInEditor(photoId, presetId, fill);
+            }}
+          />
+        )}
         {tool === 'masks' && <MasksPanel s={s} activeMask={activeMask} />}
         {tool === 'spots' && (
           <TouchUpPanel
@@ -1093,8 +1110,25 @@ function orientedSizeOf(st: { fw: number; fh: number } | null, s: DevelopSetting
   return orientedSize(st.fw, st.fh, s.orient.rotate);
 }
 
-function CropPanel({ s, wo, ho, onDone, onCancel }: { s: DevelopSettings; wo: number; ho: number; onDone: () => void; onCancel: () => void }) {
+function CropPanel({
+  s,
+  wo,
+  ho,
+  onDone,
+  onCancel,
+  onExpand,
+}: {
+  s: DevelopSettings;
+  wo: number;
+  ho: number;
+  onDone: () => void;
+  onCancel: () => void;
+  onExpand: (presetId: string, fill: ExpandFill) => void;
+}) {
   const c = s.crop;
+  const display = displayPreset();
+  const [preset, setPreset] = useState(() => (display ? 'display' : 'mbp14'));
+  const fill = editor.use((x) => x.opts.crop.fill);
   const aspectValue = c.aspect === null ? 'free' : Math.abs(c.aspect - wo / ho) < 1e-3 ? 'orig' : String(c.aspect);
   const setAspect = (v: string) => {
     const a = v === 'free' ? null : v === 'orig' ? wo / ho : parseFloat(v);
@@ -1160,6 +1194,34 @@ function CropPanel({ s, wo, ho, onDone, onCancel }: { s: DevelopSettings; wo: nu
         <Button small primary onClick={onDone}>Done</Button>
       </div>
       <p className="hint">Drag corners to resize, inside to move, outside the frame to rotate. Enter applies, Esc cancels.</p>
+      <div className="subhead" style={{ marginTop: 12 }}>
+        <span>Expand</span>
+      </div>
+      <div className="field">
+        <span className="field-label">Size</span>
+        <select value={preset} onChange={(e) => setPreset(e.target.value)} aria-label="Expand to size" style={{ flex: 1, minWidth: 0 }}>
+          <SizePresetOptions display={display} />
+        </select>
+      </div>
+      <div className="field">
+        <span className="field-label">Fill</span>
+        <select value={fill} onChange={(e) => setOpts('crop', { fill: e.target.value as ExpandFill })} aria-label="Fill for the new area">
+          {FILLS.map((f) => (
+            <option key={f.value} value={f.value} title={f.title}>
+              {f.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="row" style={{ marginTop: 8, justifyContent: 'flex-end' }}>
+        <Button small onClick={() => onExpand(preset, fill)} title="Open this photo in the Editor with its canvas grown to this size">
+          Expand in Editor…
+        </Button>
+      </div>
+      <p className="hint">
+        Grows the canvas to the chosen screen's shape around the photo (an iPhone wallpaper becomes a desktop one, for example) and fills the new area. It opens in
+        the Editor, where you can move the box before pressing Enter.
+      </p>
     </Panel>
   );
 }

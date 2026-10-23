@@ -25,7 +25,7 @@ export interface FilterDef {
 }
 
 /** Copy with edges replicated by `pad` pixels on each side (avoids dark borders when blurring). */
-function padded(src: HTMLCanvasElement, pad: number): HTMLCanvasElement {
+export function padded(src: HTMLCanvasElement, pad: number): HTMLCanvasElement {
   const w = src.width;
   const h = src.height;
   const c = createCanvas(w + pad * 2, h + pad * 2);

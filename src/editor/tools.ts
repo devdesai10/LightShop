@@ -1,12 +1,15 @@
 // Editor tools. Each tool receives pointer events in document coordinates and may draw an overlay.
 
-import { createCanvas, ctx2d } from '../lib/imageio';
+import { checkerPattern, createCanvas, ctx2d } from '../lib/imageio';
 import { rgb255ToHex } from '../lib/color';
 import { toast } from '../state/app';
-import { coversDoc, cropDoc, ensureCovers, insertLayer } from './actions';
+import { createStore } from '../state/store';
+import { coversDoc, ensureCovers, insertLayer } from './actions';
 import { EditorDoc, PixelLayer, RasterLayer, Rect, SelectMode, combineSelection, isPixel, makeSelection, selectionFromShape } from './doc';
+import { ExpandFill, FILLS, cancelPreview, containBox, expandCanvas, isExpanding, presetById, previewFor, previewKey, requestPreview } from './expand';
 import { colorRange, heal, makeTip, maskToCanvas, unionRect } from './paint';
-import { EditorState, ToolId, editor } from './session';
+import { EditorState, ToolId, activeDoc, editor, openPhotoInEditor, setOpts, syncDoc } from './session';
+import { getView, refit, setView, setViewExtent } from './viewState';
 
 export interface View {
   zoom: number;
@@ -523,7 +526,49 @@ const wand: Tool = {
 };
 
 // ---------------------------------------------------------------- move
-let moveState: { layer: PixelLayer; x0: number; y0: number; sx: number; sy: number; float?: HTMLCanvasElement; base?: HTMLCanvasElement; selMask?: HTMLCanvasElement } | null = null;
+let moveState: {
+  layer: PixelLayer;
+  x0: number;
+  y0: number;
+  sx: number;
+  sy: number;
+  float?: HTMLCanvasElement;
+  base?: HTMLCanvasElement;
+  selMask?: HTMLCanvasElement;
+  selBounds?: Rect;
+} | null = null;
+
+/** A Move tool drag is in progress. */
+export const isMoving = () => !!moveState;
+
+/**
+ * What the Move tool is dragging, for dropping it into another document: the layer, or (with a selection)
+ * the selected pixels and where they are; `grab` is where the drag started, in document pixels.
+ */
+export function movePayload(): { layer: PixelLayer; grab: { x: number; y: number }; pixels: { canvas: HTMLCanvasElement; x: number; y: number } | null } | null {
+  const m = moveState;
+  if (!m) return null;
+  if (m.float && m.selBounds) {
+    const b = m.selBounds;
+    const c = createCanvas(b.w, b.h);
+    ctx2d(c).drawImage(m.float, -b.x, -b.y);
+    return { layer: m.layer, grab: { x: m.sx, y: m.sy }, pixels: { canvas: c, x: b.x, y: b.y } };
+  }
+  return { layer: m.layer, grab: { x: m.sx, y: m.sy }, pixels: null };
+}
+
+/** Ends a Move tool drag without moving anything (the layer or selection goes back where it was). */
+export function abortMove(doc: EditorDoc) {
+  const m = moveState;
+  moveState = null;
+  if (!m) return;
+  if (m.float) doc.preview = null;
+  else {
+    m.layer.x = m.x0;
+    m.layer.y = m.y0;
+  }
+  doc.invalidate();
+}
 
 function pickLayerAt(doc: EditorDoc, x: number, y: number): PixelLayer | null {
   for (let i = doc.layers.length - 1; i >= 0; i--) {
@@ -573,6 +618,7 @@ const move: Tool = {
       moveState.float = float;
       moveState.base = base;
       moveState.selMask = doc.selection.mask;
+      moveState.selBounds = doc.selection.bounds;
     }
   },
   move: (e, c) => {
@@ -646,16 +692,154 @@ const move: Tool = {
 };
 
 // ---------------------------------------------------------------- crop
-let cropRect: Rect | null = null;
-let cropDrag: { mode: 'new' | 'move' | 'handle'; hx: number; hy: number; start: Rect; sx: number; sy: number } | null = null;
+// The box may reach past the canvas: applying it then expands the canvas, and the crop options choose how the
+// new area is filled (see expand.ts). A size preset ("Expand to") also scales the result to its exact pixels.
 
-const crop: Tool = {
+/** Output size of a size preset. */
+export interface CropOut {
+  w: number;
+  h: number;
+  presetId: string;
+  label: string;
+}
+interface PendingCrop {
+  docId: string;
+  rect: Rect;
+  out: CropOut | null;
+}
+type CropDrag = { mode: 'new' | 'move' | 'handle'; hx: number; hy: number; start: Rect; sx: number; sy: number };
+
+let cropBox: PendingCrop | null = null;
+let cropDrag: CropDrag | null = null;
+
+/** The pending crop, for the options bar. Updated when a drag ends rather than on every move. */
+export const cropUi = createStore<{ pending: PendingCrop | null }>({ pending: null });
+
+const pendingFor = (doc: EditorDoc) => (cropBox && cropBox.docId === doc.id ? cropBox : null);
+const docById = (id: string) => editor.get().docs.find((d) => d.id === id) ?? null;
+
+/** Edges snap to the canvas within this many screen pixels (hold ⌘ to place freely). */
+const SNAP = 8;
+
+function snapTo(v: number, targets: number[], tol: number): number {
+  let best = v;
+  let bd = tol;
+  for (const t of targets) {
+    const d = Math.abs(v - t);
+    if (d < bd) {
+      bd = d;
+      best = t;
+    }
+  }
+  return best;
+}
+
+/** Snaps a moved box's left (or top) edge so an edge or its centre lines up with the canvas. */
+function snapMove(x: number, w: number, W: number, tol: number): number {
+  let best = 0;
+  let bd = tol;
+  for (const d of [-x, W - x, -(x + w), W - (x + w), W / 2 - (x + w / 2)]) {
+    if (Math.abs(d) < bd) {
+      bd = Math.abs(d);
+      best = d;
+    }
+  }
+  return x + best;
+}
+
+/** The box while dragging a handle (or drawing a new one) to (px, py), keeping the aspect `a` if set. */
+function resizeBox(d: CropDrag, px: number, py: number, a: number | null): Rect {
+  const s = d.start;
+  if (d.mode === 'handle' && d.hx === 0) {
+    const ay = d.hy === 1 ? s.y : s.y + s.h;
+    const h = Math.abs(py - ay);
+    const y = py >= ay ? ay : ay - h;
+    if (!a) return { x: s.x, y, w: s.w, h };
+    const w = h * a;
+    return { x: s.x + s.w / 2 - w / 2, y, w, h };
+  }
+  if (d.mode === 'handle' && d.hy === 0) {
+    const ax = d.hx === 1 ? s.x : s.x + s.w;
+    const w = Math.abs(px - ax);
+    const x = px >= ax ? ax : ax - w;
+    if (!a) return { x, y: s.y, w, h: s.h };
+    const h = w / a;
+    return { x, y: s.y + s.h / 2 - h / 2, w, h };
+  }
+  // A corner, or a new box: the opposite corner stays put.
+  const ax = d.mode === 'new' || d.hx === 1 ? s.x : s.x + s.w;
+  const ay = d.mode === 'new' || d.hy === 1 ? s.y : s.y + s.h;
+  let w = Math.abs(px - ax);
+  let h = Math.abs(py - ay);
+  if (a) {
+    if (w / a > h) h = w / a;
+    else w = h * a;
+  }
+  return { x: px >= ax ? ax : ax - w, y: py >= ay ? ay : ay - h, w, h };
+}
+
+/** Shares the box with the options bar and lets the view show it (zooming out if it reaches past the window). */
+function publish() {
+  cropUi.set({ pending: cropBox ? { ...cropBox, rect: { ...cropBox.rect } } : null });
+  const d = cropBox && docById(cropBox.docId);
+  if (d) setViewExtent(d, cropBox!.rect);
+}
+
+/** Sets (or with null, removes) the crop box of `doc`. */
+export function setPendingCrop(doc: EditorDoc, rect: Rect | null, out: CropOut | null = null) {
+  if (!rect) return clearCrop();
+  const prev = cropBox && cropBox.docId !== doc.id ? docById(cropBox.docId) : null;
+  if (prev) setViewExtent(prev, null);
+  cropBox = { docId: doc.id, rect: { ...rect }, out };
+  publish();
+  doc.onRender.emit();
+}
+
+export function clearCrop() {
+  const prev = cropBox;
+  cropBox = null;
+  cropDrag = null;
+  cancelPreview();
+  cropUi.set({ pending: null });
+  const d = prev && docById(prev.docId);
+  if (d) setViewExtent(d, null);
+}
+
+/** The box for a size preset: its shape around the whole canvas. Applying it scales the result to the preset. */
+export function startPreset(doc: EditorDoc, presetId: string) {
+  const p = presetById(presetId);
+  if (!p) return;
+  setOpts('crop', { aspect: p.w / p.h });
+  setPendingCrop(doc, containBox(doc, p.w / p.h), { w: p.w, h: p.h, presetId: p.id, label: p.label });
+}
+
+/** Locks the box to an aspect ratio (null: free), reshaping a pending box about its centre. Ends any size preset. */
+export function setCropAspect(doc: EditorDoc | null, aspect: number | null) {
+  setOpts('crop', { aspect });
+  const cur = doc && pendingFor(doc);
+  if (!doc || !cur) return;
+  let r = cur.rect;
+  if (aspect) {
+    const w = Math.sqrt(r.w * r.h * aspect);
+    const h = w / aspect;
+    r = { x: r.x + r.w / 2 - w / 2, y: r.y + r.h / 2 - h / 2, w, h };
+  }
+  setPendingCrop(doc, r, null);
+}
+
+/** Keeps the box but drops a size preset's scaling (the result keeps the box's own pixels). */
+export function clearCropOut(doc: EditorDoc) {
+  const cur = pendingFor(doc);
+  if (cur) setPendingCrop(doc, cur.rect, null);
+}
+
+const cropTool: Tool = {
   cursor: () => 'crosshair',
   down: (e, c) => {
-    const { doc } = c;
+    const cur = pendingFor(c.doc);
     const tol = 10 / c.view.zoom;
-    if (cropRect) {
-      const r = cropRect;
+    if (cur) {
+      const r = cur.rect;
       for (const hx of [-1, 0, 1])
         for (const hy of [-1, 0, 1]) {
           if (!hx && !hy) continue;
@@ -671,61 +855,98 @@ const crop: Tool = {
         return;
       }
     }
-    cropRect = { x: e.x, y: e.y, w: 0, h: 0 };
-    cropDrag = { mode: 'new', hx: 1, hy: 1, start: { x: e.x, y: e.y, w: 0, h: 0 }, sx: e.x, sy: e.y };
-    void doc;
+    // A new box, which may start outside the canvas. A size preset's output carries over (its ratio stays locked).
+    const snap = SNAP / c.view.zoom;
+    const x = e.mod ? e.x : snapTo(e.x, [0, c.doc.width], snap);
+    const y = e.mod ? e.y : snapTo(e.y, [0, c.doc.height], snap);
+    cropBox = { docId: c.doc.id, rect: { x, y, w: 0, h: 0 }, out: cur?.out ?? null };
+    cropDrag = { mode: 'new', hx: 1, hy: 1, start: { x, y, w: 0, h: 0 }, sx: x, sy: y };
   },
   move: (e, c) => {
     const d = cropDrag;
-    if (!d || !cropRect) return;
-    const a = c.st.opts.crop.aspect;
+    const cur = pendingFor(c.doc);
+    if (!d || !cur) return;
+    const W = c.doc.width;
+    const H = c.doc.height;
+    const tol = SNAP / c.view.zoom;
     if (d.mode === 'move') {
-      cropRect = { ...d.start, x: d.start.x + e.x - d.sx, y: d.start.y + e.y - d.sy };
+      let x = d.start.x + e.x - d.sx;
+      let y = d.start.y + e.y - d.sy;
+      if (!e.mod) {
+        x = snapMove(x, d.start.w, W, tol);
+        y = snapMove(y, d.start.h, H, tol);
+      }
+      cur.rect = { ...d.start, x, y };
     } else {
-      let x0 = d.start.x, y0 = d.start.y, x1 = d.start.x + d.start.w, y1 = d.start.y + d.start.h;
-      if (d.mode === 'new') {
-        x1 = e.x;
-        y1 = e.y;
-      } else {
-        if (d.hx === 1) x1 = e.x;
-        if (d.hx === -1) x0 = e.x;
-        if (d.hy === 1) y1 = e.y;
-        if (d.hy === -1) y0 = e.y;
-      }
-      let r = { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
-      if (a) {
-        if (r.w / a > r.h) r = { ...r, h: r.w / a };
-        else r = { ...r, w: r.h * a };
-        if (x1 < x0) r.x = x0 - r.w;
-        if (y1 < y0) r.y = y0 - r.h;
-      }
-      cropRect = r;
+      const px = e.mod ? e.x : snapTo(e.x, [0, W], tol);
+      const py = e.mod ? e.y : snapTo(e.y, [0, H], tol);
+      cur.rect = resizeBox(d, px, py, c.st.opts.crop.aspect);
     }
     c.redraw();
   },
   up: (_e, c) => {
+    const cur = pendingFor(c.doc);
     cropDrag = null;
-    if (cropRect && (cropRect.w < 3 || cropRect.h < 3)) cropRect = null;
+    if (!cur) return;
+    if (cur.rect.w < 3 || cur.rect.h < 3) clearCrop();
+    else publish();
     c.redraw();
   },
   key: (e, c) => {
-    if (e.key === 'Enter' && cropRect) {
+    if (!pendingFor(c.doc)) return false;
+    if (e.key === 'Enter') {
       applyCrop(c);
       return true;
     }
-    if (e.key === 'Escape' && cropRect) {
-      cropRect = null;
+    if (e.key === 'Escape') {
+      clearCrop();
       c.redraw();
       return true;
     }
     return false;
   },
   overlay: (g, c) => {
-    if (!cropRect) return;
-    const r = cropRect;
-    const [x, y] = toScreen(c.view, r.x, r.y);
-    const w = r.w * c.view.zoom;
-    const h = r.h * c.view.zoom;
+    const cur = pendingFor(c.doc);
+    if (!cur) return;
+    const v = c.view;
+    const r = cur.rect;
+    const [x, y] = toScreen(v, r.x, r.y);
+    const w = r.w * v.zoom;
+    const h = r.h * v.zoom;
+    const [dx, dy] = toScreen(v, 0, 0);
+    const outside = r.x < -0.5 || r.y < -0.5 || r.x + r.w > c.doc.width + 0.5 || r.y + r.h > c.doc.height + 0.5;
+    const o = editor.get().opts.crop;
+    let waiting = false;
+    if (outside) {
+      // The new area: the box minus the canvas. It shows the fill (a small preview of it) or a checkerboard.
+      g.save();
+      g.beginPath();
+      g.rect(x, y, w, h);
+      g.clip();
+      g.beginPath();
+      g.rect(x, y, w, h);
+      g.rect(dx, dy, c.doc.width * v.zoom, c.doc.height * v.zoom);
+      g.clip('evenodd');
+      if (o.fill === 'color') {
+        g.fillStyle = o.fillColor;
+        g.fillRect(x, y, w, h);
+      } else {
+        g.fillStyle = checkerPattern(g);
+        g.fillRect(x, y, w, h);
+        if (o.fill !== 'none' && !cropDrag) {
+          const pv = previewFor(previewKey(c.doc, r, o.fill, o.fillColor));
+          if (pv) {
+            g.imageSmoothingEnabled = true;
+            g.imageSmoothingQuality = 'high';
+            g.drawImage(pv, x, y, w, h);
+          } else {
+            waiting = true;
+            requestPreview(c.doc, { ...r }, o.fill, o.fillColor, () => c.doc.onRender.emit());
+          }
+        }
+      }
+      g.restore();
+    }
     g.fillStyle = 'rgba(0,0,0,0.55)';
     g.beginPath();
     g.rect(0, 0, g.canvas.width, g.canvas.height);
@@ -745,22 +966,70 @@ const crop: Tool = {
     g.stroke();
     g.fillStyle = '#fff';
     for (const hx of [0, 0.5, 1]) for (const hy of [0, 0.5, 1]) if (hx !== 0.5 || hy !== 0.5) g.fillRect(x + w * hx - 4, y + h * hy - 4, 8, 8);
+    const outW = cur.out ? cur.out.w : Math.round(r.w);
+    const outH = cur.out ? cur.out.h : Math.round(r.h);
+    const fill = outside && o.fill !== 'none' ? ` · ${FILLS.find((f) => f.value === o.fill)?.label} fill${waiting ? ' (making a preview…)' : ''}` : '';
     g.font = '11px system-ui';
     g.fillStyle = '#fff';
-    g.fillText(`${Math.round(r.w)} × ${Math.round(r.h)} px — Enter to crop, Esc to cancel`, x + 4, y - 8 > 12 ? y - 8 : y + 16);
+    g.fillText(`${outW} × ${outH} px${fill} — Enter to apply, Esc to cancel`, x + 4, y - 8 > 12 ? y - 8 : y + 16);
   },
-  deactivate: () => {
-    cropRect = null;
-  },
+  deactivate: () => clearCrop(),
 };
 
+/** Applies the pending crop of `c.doc`: crops, expands and fills as set up. */
 export function applyCrop(c: ToolCtx) {
-  if (!cropRect) return;
-  cropDoc(c.doc, cropRect);
-  cropRect = null;
-  c.setView({}, undefined);
+  const cur = pendingFor(c.doc);
+  if (!cur || isExpanding()) return;
+  const o = editor.get().opts.crop;
+  const doc = c.doc;
+  const out = cur.out;
+  void expandCanvas(doc, { ...cur.rect }, { out: out && { w: out.w, h: out.h }, fill: o.fill, color: o.fillColor }).then((ok) => {
+    if (!ok) return;
+    if (pendingFor(doc)) clearCrop();
+    c.setView({}, undefined);
+  });
 }
-export const hasPendingCrop = () => !!cropRect;
+export const hasPendingCrop = (doc?: EditorDoc | null) => !!cropBox && (!doc || cropBox.docId === doc.id);
+
+/** A tool context for `doc` outside the canvas's own events (menus, buttons, shortcuts). */
+export function toolCtx(doc: EditorDoc): ToolCtx {
+  return {
+    doc,
+    st: editor.get(),
+    view: getView(doc),
+    setView: (v, a) => (Object.keys(v).length ? setView(doc, v, a) : refit(doc)),
+    redraw: () => doc.onRender.emit(),
+    editText: () => {},
+    hover: null,
+  };
+}
+
+/** Switches tools, letting the previous one tidy up (a pending crop box is dropped, for instance). */
+export function selectTool(t: ToolId) {
+  const doc = activeDoc();
+  const cur = editor.get().tool;
+  if (cur !== t && doc) {
+    TOOLS[cur].deactivate?.(toolCtx(doc));
+    doc.onRender.emit();
+  }
+  editor.set({ tool: t });
+}
+
+/**
+ * Opens a catalog photo (as developed) in the Editor with the Crop tool's box set to a size preset around it,
+ * ready to adjust and apply. Used by Develop's Expand section.
+ */
+export async function expandPhotoInEditor(photoId: string, presetId: string, fill: ExpandFill) {
+  setOpts('crop', { fill });
+  const doc = await openPhotoInEditor(photoId, { developed: true });
+  if (!doc) return;
+  // An open document may first be brought up to date with Develop, which can change its size.
+  await syncDoc(doc, true);
+  if (!editor.get().docs.includes(doc)) return;
+  editor.set({ activeDoc: doc.id });
+  selectTool('crop');
+  startPreset(doc, presetId);
+}
 
 // ---------------------------------------------------------------- fill tools
 const bucket: Tool = {
@@ -1003,7 +1272,7 @@ export const TOOLS: Record<ToolId, Tool> = {
   marquee,
   lasso,
   wand,
-  crop,
+  crop: cropTool,
   eyedropper,
   heal: paintTool('heal'),
   brush: paintTool('brush'),

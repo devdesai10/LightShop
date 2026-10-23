@@ -10,6 +10,7 @@ import { dev, flushDevelop } from '../develop/state';
 import { confirmDialog } from '../ui/dialogs';
 import type { Adjustment } from './adjust';
 import { BlendMode, EditorDoc, Layer, RasterLayer, SelectMode, TextProps, canvasRev, renderText } from './doc';
+import type { ExpandFill } from './expand';
 import { refit } from './viewState';
 
 export type ToolId =
@@ -35,7 +36,8 @@ export interface ToolOptions {
   gradient: { type: 'linear' | 'radial'; toTransparent: boolean; opacity: number };
   text: Omit<TextProps, 'text' | 'color'>;
   shape: { type: 'rect' | 'ellipse' | 'line'; fill: boolean; strokeWidth: number };
-  crop: { aspect: number | null };
+  /** `fill` and `fillColor` cover the new area when the crop box reaches past the canvas. */
+  crop: { aspect: number | null; fill: ExpandFill; fillColor: string };
   move: { autoSelect: boolean };
 }
 
@@ -64,7 +66,7 @@ const DEFAULT_OPTS: ToolOptions = {
   gradient: { type: 'linear', toTransparent: false, opacity: 1 },
   text: { font: 'Helvetica, Arial, sans-serif', size: 64, bold: false, italic: false, align: 'left', lineHeight: 1.2 },
   shape: { type: 'rect', fill: true, strokeWidth: 0 },
-  crop: { aspect: null },
+  crop: { aspect: null, fill: 'content', fillColor: '#000000' },
   move: { autoSelect: false },
 };
 
