@@ -2,7 +2,7 @@
   "name": "lightshop",
   "productName": "LightShop",
   "private": true,
-  "version": "2.2.0",
+  "version": "2.3.0",
   "type": "module",
   "description": "LightShop: a photo library, non-destructive RAW-style developer and layered image editor in one app.",
   "main": "electron/main.cjs",

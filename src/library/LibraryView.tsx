@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Check, Flag, FolderPlus, Grid2x2, Image as ImageIcon, ImagePlus, Images, Layers, Pencil, Search, SlidersHorizontal, Trash, Upload, X,
+  ArrowDownAZ, CalendarDays, Check, Flag, FolderPlus, Grid2x2, Image as ImageIcon, ImagePlus, Images, Layers, Pencil, SlidersHorizontal, Trash, Upload, X,
 } from 'lucide-react';
 import {
-  AppState, ColorLabel, LABELS, Photo, addToCollection, app, cachedThumb, createCollection, deleteCollection, deletePhotos, filterPhotos,
-  importFiles, IMPORT_ACCEPT, openInDevelop, removeFromCollection, renameCollection, setFlag, setLabel, setRating, thumbUrl, updatePhotos,
+  AppState, ColorLabel, EVENT_GAPS, GroupBy, LABELS, LibraryViewMode, Photo, addToCollection, app, createCollection, deleteCollection, deletePhotos,
+  filterPhotos, importFiles, IMPORT_ACCEPT, matchesDate, openInDevelop, removeFromCollection, renameCollection, setFlag, setLabel, setRating,
+  thumbUrl, toast, updatePhotos,
 } from '../state/app';
+import { countLabel, formatDateRange, formatKey, parseKey, yearKey } from '../lib/dates';
 import { formatShutter } from '../lib/exif';
 import { formatBytes, isTypingTarget, modKey, pickFiles } from '../lib/util';
 import { Button, IconButton, Modal, Panel, Segmented, Stars, cx } from '../ui/controls';
@@ -17,30 +19,58 @@ import { openPhotoInEditor } from '../editor/session';
 import { renderThumbnailFor } from '../develop/thumbs';
 import { confirmDialog, promptText } from '../ui/dialogs';
 import { wheelDelta, wheelZoomFactor } from '../lib/gestures';
+import { CalendarView } from './CalendarView';
+import { DatesPanel } from './DatesPanel';
+import { Section, collectionSpans, computeEvents, datedName, groupSections, sectionLabel, sortCollections, verticalNeighbour } from './grouping';
+import { Thumb } from './Thumb';
+
+export { Thumb };
 
 const THUMB_MIN = 110;
 const THUMB_MAX = 340;
 
-export function useVisiblePhotos(): Photo[] {
+/**
+ * The Library's photo lists. `base`: the current source and filters except the date filter (for the
+ * Dates panel and the calendar). `visible`: with the date filter too. `sections`: `visible` split into the
+ * grid's date groups, and `ordered`: those photos in display order.
+ */
+export function useLibraryPhotos() {
   const photos = app.use((s) => s.photos);
   const filter = app.use((s) => s.filter);
   const sort = app.use((s) => s.sort);
   const sortDesc = app.use((s) => s.sortDesc);
   const lastImport = app.use((s) => s.lastImport);
-  return useMemo(() => filterPhotos({ photos, filter, sort, sortDesc, lastImport }), [photos, filter, sort, sortDesc, lastImport]);
+  const groupBy = app.use((s) => s.groupBy);
+  const gapHours = app.use((s) => s.eventGapHours);
+  return useMemo(() => {
+    const base = filterPhotos({ photos, filter: { ...filter, date: null }, sort, sortDesc, lastImport });
+    const visible = filter.date ? base.filter((p) => matchesDate(p, filter.date!)) : base;
+    const events = groupBy === 'event' ? computeEvents(photos, gapHours) : null;
+    const sections = groupSections(visible, groupBy, sortDesc, events);
+    const ordered = sections.length === 1 ? sections[0].photos : sections.flatMap((s) => s.photos);
+    return { base, visible, sections, ordered };
+  }, [photos, filter, sort, sortDesc, lastImport, groupBy, gapHours]);
 }
 
-export function Thumb({ photo, className }: { photo: Photo; className?: string }) {
-  const [url, setUrl] = useState<string | null>(() => cachedThumb(photo));
-  useEffect(() => {
-    let live = true;
-    thumbUrl(photo).then((u) => live && setUrl(u));
-    return () => {
-      live = false;
-    };
-  }, [photo.id, photo.thumbVersion]);
-  return url ? <img src={url} alt={photo.name} className={className} draggable={false} /> : <div className={cx('thumb-placeholder', className)} />;
+/** The photos the Library shows, in display order (also the Develop filmstrip). */
+export function useVisiblePhotos(): Photo[] {
+  return useLibraryPhotos().ordered;
 }
+
+/** Switches the Library to the calendar, on the month of the date filter if there is one. */
+export function showCalendar() {
+  app.set((s) => {
+    const kind = s.filter.date ? parseKey(s.filter.date)?.kind : undefined;
+    const calendarMonth = kind === 'day' || kind === 'month' ? s.filter.date!.slice(0, 7) : kind === 'year' ? null : s.calendarMonth;
+    return { libraryView: 'calendar', calendarMonth };
+  });
+}
+
+const setView = (v: LibraryViewMode) => (v === 'calendar' ? showCalendar() : app.set({ libraryView: v }));
+
+/** Shows a catalog source (all of its dates); the calendar then opens on its newest photos. */
+const setSource = (source: AppState['filter']['source'], collection: string | null = null) =>
+  app.set((s) => ({ filter: { ...s.filter, source, collection, date: null }, calendarMonth: null }));
 
 export async function promptImport() {
   const files = await pickFiles(IMPORT_ACCEPT, true);
@@ -54,81 +84,134 @@ const FLAG_FILTERS: { value: AppState['filter']['flag']; label: string }[] = [
   { value: 'rejected', label: 'Rejected' },
 ];
 
+const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
+  { value: 'event', label: 'Events' },
+  { value: 'day', label: 'Days' },
+  { value: 'month', label: 'Months' },
+  { value: 'year', label: 'Years' },
+  { value: 'none', label: 'No groups' },
+];
+
 function FilterBar() {
   const filter = app.use((s) => s.filter);
   const sort = app.use((s) => s.sort);
   const sortDesc = app.use((s) => s.sortDesc);
   const view = app.use((s) => s.libraryView);
   const size = app.use((s) => s.thumbSize);
+  const groupBy = app.use((s) => s.groupBy);
+  const gapHours = app.use((s) => s.eventGapHours);
   const setF = (p: Partial<AppState['filter']>) => app.set((s) => ({ filter: { ...s.filter, ...p } }));
   return (
     <div className="filterbar">
-      <div className="row">
-        <Search size={14} className="muted" />
-        <input
-          className="text-input search"
-          type="search"
-          placeholder="Search"
-          title="Search by name, camera, lens, or keyword"
-          value={filter.text}
-          onChange={(e) => setF({ text: e.target.value })}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') (e.target as HTMLInputElement).blur();
-            e.stopPropagation();
-          }}
-          aria-label="Search photos"
-        />
-      </div>
-      <div className="row" title="Show photos with at least this rating">
-        <Stars value={filter.minRating} onChange={(minRating) => setF({ minRating })} size={13} />
-      </div>
-      <select value={filter.flag} onChange={(e) => setF({ flag: e.target.value as AppState['filter']['flag'] })} aria-label="Flag filter">
-        {FLAG_FILTERS.map((f) => (
-          <option key={f.value} value={f.value}>
-            {f.label}
-          </option>
-        ))}
-      </select>
-      <div className="row" role="group" aria-label="Color label filter">
-        {LABELS.map((l) => (
-          <button
-            key={l}
-            className={cx('label-dot', `label-${l}`)}
-            style={{ border: filter.label === l ? '2px solid #fff' : '2px solid transparent', width: 14, height: 14, padding: 0 }}
-            onClick={() => setF({ label: filter.label === l ? 'any' : l })}
-            aria-label={`Filter ${l} label`}
-            aria-pressed={filter.label === l}
-          />
-        ))}
-      </div>
-      <div className="grow" />
-      <select value={sort} onChange={(e) => app.set({ sort: e.target.value as AppState['sort'] })} aria-label="Sort by">
-        <option value="captured">Capture time</option>
-        <option value="imported">Import time</option>
-        <option value="name">File name</option>
-        <option value="rating">Rating</option>
-      </select>
-      <IconButton title={sortDesc ? 'Descending' : 'Ascending'} onClick={() => app.set({ sortDesc: !sortDesc })}>
-        <span style={{ fontSize: 13 }}>{sortDesc ? '↓' : '↑'}</span>
-      </IconButton>
-      <input
-        type="range"
-        className="mini-range"
-        min={THUMB_MIN}
-        max={THUMB_MAX}
-        value={size}
-        onChange={(e) => app.set({ thumbSize: +e.target.value })}
-        aria-label="Thumbnail size"
-        title="Thumbnail size (or pinch the grid)"
-      />
       <Segmented
+        className="view-switch"
         value={view}
-        onChange={(libraryView) => app.set({ libraryView })}
+        onChange={setView}
         options={[
           { value: 'grid', label: <Grid2x2 size={13} />, title: 'Grid (G)' },
           { value: 'loupe', label: <ImageIcon size={13} />, title: 'Loupe (E)' },
+          { value: 'calendar', label: <CalendarDays size={13} />, title: 'Calendar (C)' },
         ]}
       />
+      <input
+        className="text-input search"
+        type="search"
+        placeholder="Search"
+        title="Search by name, camera, lens, or keyword"
+        value={filter.text}
+        onChange={(e) => setF({ text: e.target.value })}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') (e.target as HTMLInputElement).blur();
+          e.stopPropagation();
+        }}
+        aria-label="Search photos"
+      />
+      {filter.date && (
+        <span className="chip date-chip" title={`Showing photos from ${formatKey(filter.date)}`}>
+          <CalendarDays size={12} />
+          {formatKey(filter.date, 'short')}
+          <button aria-label="Show all dates" title="Show all dates" onClick={() => setF({ date: null })}>
+            <X size={11} />
+          </button>
+        </span>
+      )}
+      <div className="bar-group" role="group" aria-label="Rating, flag and label filters">
+        <div className="row" title="Show photos with at least this rating">
+          <Stars value={filter.minRating} onChange={(minRating) => setF({ minRating })} size={13} />
+        </div>
+        <select value={filter.flag} onChange={(e) => setF({ flag: e.target.value as AppState['filter']['flag'] })} aria-label="Flag filter">
+          {FLAG_FILTERS.map((f) => (
+            <option key={f.value} value={f.value}>
+              {f.label}
+            </option>
+          ))}
+        </select>
+        <div className="row" role="group" aria-label="Color label filter">
+          {LABELS.map((l) => (
+            <button
+              key={l}
+              className={cx('label-dot', `label-${l}`)}
+              style={{ border: filter.label === l ? '2px solid #fff' : '2px solid transparent', width: 14, height: 14, padding: 0 }}
+              onClick={() => setF({ label: filter.label === l ? 'any' : l })}
+              aria-label={`Filter ${l} label`}
+              aria-pressed={filter.label === l}
+            />
+          ))}
+        </div>
+      </div>
+      {view !== 'calendar' && (
+        <div className="bar-group arrange" role="group" aria-label="Arrange">
+          {view === 'grid' && (
+            <>
+              <span className="filter-label" aria-hidden="true">
+                Group
+              </span>
+              <select value={groupBy} onChange={(e) => app.set({ groupBy: e.target.value as GroupBy })} aria-label="Group photos by" title="Group photos by when they were taken">
+                {GROUP_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              {groupBy === 'event' && (
+                <select
+                  value={gapHours}
+                  onChange={(e) => app.set({ eventGapHours: +e.target.value })}
+                  aria-label="New event after a gap of"
+                  title="A new event starts when photos are further apart than this"
+                >
+                  {EVENT_GAPS.map((h) => (
+                    <option key={h} value={h}>
+                      {h < 24 ? `${h} h apart` : '1 day apart'}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </>
+          )}
+          <select value={sort} onChange={(e) => app.set({ sort: e.target.value as AppState['sort'] })} aria-label="Sort by">
+            <option value="captured">Capture time</option>
+            <option value="imported">Import time</option>
+            <option value="name">File name</option>
+            <option value="rating">Rating</option>
+          </select>
+          <IconButton title={sortDesc ? 'Descending (newest groups first)' : 'Ascending (oldest groups first)'} onClick={() => app.set({ sortDesc: !sortDesc })}>
+            <span style={{ fontSize: 13 }}>{sortDesc ? '↓' : '↑'}</span>
+          </IconButton>
+          {view === 'grid' && (
+            <input
+              type="range"
+              className="mini-range"
+              min={THUMB_MIN}
+              max={THUMB_MAX}
+              value={size}
+              onChange={(e) => app.set({ thumbSize: +e.target.value })}
+              aria-label="Thumbnail size"
+              title="Thumbnail size (or pinch the grid)"
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -173,11 +256,61 @@ function GridCell({ p, selected, active, onClick, onDouble }: { p: Photo; select
   );
 }
 
-function Grid({ photos }: { photos: Photo[] }) {
+type LabelContext = Parameters<typeof sectionLabel>[1];
+
+/** Header of a date group in the grid: when, how many, and quick actions. */
+function SectionHeader({ section, ctx }: { section: Section; ctx: LabelContext }) {
+  const label = sectionLabel(section, ctx);
+  const isEvent = section.kind === 'event' && !!section.event;
+  const select = () => app.set({ selected: section.photos.map((p) => p.id), activeId: section.photos[0]?.id ?? null });
+  const save = async () => {
+    // Naming an event takes all of its photos, even ones the filters hide; other groups take what's shown.
+    const ids = isEvent ? section.event!.ids : section.photos.map((p) => p.id);
+    const name = await promptText(isEvent ? 'Name this event' : 'New collection', label.title, {
+      message: `${countLabel(ids.length)} go into a new collection with this name.`,
+      okLabel: 'Create',
+    });
+    if (!name?.trim()) return;
+    await createCollection(name.trim(), ids);
+    toast(`Created "${name.trim()}" with ${countLabel(ids.length)}`, 'success');
+  };
+  return (
+    <header className="group-head">
+      <div className="group-title">
+        <h3 id={`grp-${section.key}`}>{label.title}</h3>
+        <span className="group-meta">{label.meta}</span>
+      </div>
+      <div className="group-actions">
+        <Button small onClick={select} title="Select every photo in this group">
+          Select
+        </Button>
+        {label.named ? (
+          <Button small onClick={() => setSource('collection', label.named!.id)} title={`Show the "${label.named.name}" collection`}>
+            <Layers size={12} /> Open collection
+          </Button>
+        ) : (
+          <Button small onClick={save} title={isEvent ? 'Give this event a name (saved as a collection)' : 'Save these photos as a collection'}>
+            <FolderPlus size={12} /> {isEvent ? 'Name event…' : 'Make collection…'}
+          </Button>
+        )}
+      </div>
+    </header>
+  );
+}
+
+function Grid({ sections, photos }: { sections: Section[]; photos: Photo[] }) {
   const selected = app.use((s) => s.selected);
   const activeId = app.use((s) => s.activeId);
   const size = app.use((s) => s.thumbSize);
+  const all = app.use((s) => s.photos);
+  const collections = app.use((s) => s.collections);
   const sel = useMemo(() => new Set(selected), [selected]);
+  const grouped = sections.length > 0 && sections[0].kind !== 'none';
+  // Needed to name events after a matching collection.
+  const ctx = useMemo<LabelContext>(
+    () => (grouped ? { byId: new Map(all.map((p) => [p.id, p])), spans: collectionSpans(all), collections } : { byId: new Map(), spans: new Map(), collections }),
+    [grouped, all, collections],
+  );
   const anchor = useRef<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -223,13 +356,25 @@ function Grid({ photos }: { photos: Photo[] }) {
   }, [hasPhotos]);
 
   if (!photos.length) return <EmptyState />;
+  const columns = { gridTemplateColumns: `repeat(auto-fill, minmax(${size}px, 1fr))` };
+  const cells = (list: Photo[]) =>
+    list.map((p) => <GridCell key={p.id} p={p} selected={sel.has(p.id)} active={p.id === activeId} onClick={(e) => click(p, e)} onDouble={() => openInDevelop(p.id)} />);
   return (
-    <div className="grid-scroll" ref={ref} data-cols>
-      <div className="grid" role="grid" aria-label="Photos" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${size}px, 1fr))` }}>
-        {photos.map((p) => (
-          <GridCell key={p.id} p={p} selected={sel.has(p.id)} active={p.id === activeId} onClick={(e) => click(p, e)} onDouble={() => openInDevelop(p.id)} />
-        ))}
-      </div>
+    <div className={cx('grid-scroll', grouped && 'grouped')} ref={ref} data-cols>
+      {grouped ? (
+        sections.map((s) => (
+          <section key={s.key} className="lib-group" aria-labelledby={`grp-${s.key}`}>
+            <SectionHeader section={s} ctx={ctx} />
+            <div className="grid" role="grid" aria-labelledby={`grp-${s.key}`} style={columns}>
+              {cells(s.photos)}
+            </div>
+          </section>
+        ))
+      ) : (
+        <div className="grid" role="grid" aria-label="Photos" style={columns}>
+          {cells(photos)}
+        </div>
+      )}
     </div>
   );
 }
@@ -241,7 +386,9 @@ function EmptyState() {
       {total ? (
         <>
           <h3>No photos match the current filter</h3>
-          <Button onClick={() => app.set((s) => ({ filter: { ...s.filter, text: '', minRating: 0, flag: 'all', label: 'any', source: 'all', collection: null } }))}>Clear filters</Button>
+          <Button onClick={() => app.set((s) => ({ filter: { ...s.filter, text: '', minRating: 0, flag: 'all', label: 'any', source: 'all', collection: null, date: null } }))}>
+            Clear filters
+          </Button>
         </>
       ) : (
         <>
@@ -267,16 +414,27 @@ function Loupe({ photo }: { photo: Photo | undefined }) {
   );
 }
 
-function CatalogPanel({ photos }: { photos: Photo[] }) {
+function CatalogPanel({ photos, base }: { photos: Photo[]; base: Photo[] }) {
   const filter = app.use((s) => s.filter);
   const all = app.use((s) => s.photos);
   const lastImport = app.use((s) => s.lastImport);
   const collections = app.use((s) => s.collections);
+  const collectionSort = app.use((s) => s.collectionSort);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
-  const setSource = (source: AppState['filter']['source'], collection: string | null = null) =>
-    app.set((s) => ({ filter: { ...s.filter, source, collection } }));
   const editedCount = all.filter((p) => isEdited(p.settings) || p.derivedFrom).length;
+  const spans = useMemo(() => collectionSpans(all), [all]);
+  const sorted = useMemo(() => sortCollections(collections, spans, collectionSort), [collections, spans, collectionSort]);
+  const newCollection = async () => {
+    const sel = new Set(app.get().selected);
+    const name = await promptText('New collection', datedName(all.filter((p) => sel.has(p.id))) ?? `Collection ${collections.length + 1}`, {
+      message: sel.size ? `The ${countLabel(sel.size, 'selected photo')} go into it. Drag more photos onto it any time.` : 'Drag photos onto it to add them.',
+      okLabel: 'Create',
+    });
+    if (name?.trim()) await createCollection(name.trim(), [...sel]);
+  };
+  // When sorted by date, collections are grouped under the year of their newest photo.
+  let lastYear: string | null = null;
   return (
     <>
       <div style={{ padding: 10 }}>
@@ -297,26 +455,41 @@ function CatalogPanel({ photos }: { photos: Photo[] }) {
           </li>
         </ul>
       </Panel>
+      <DatesPanel photos={base} onCalendar={showCalendar} />
       <Panel
         title="Collections"
         id="lib-collections"
         actions={
-          <IconButton title="New collection from selection" onClick={async () => {
-            const name = await promptText('New collection', `Collection ${collections.length + 1}`, { okLabel: 'Create' });
-            if (name?.trim()) await createCollection(name.trim(), app.get().selected);
-          }}>
-            <FolderPlus size={14} />
-          </IconButton>
+          <>
+            <IconButton
+              title={collectionSort === 'date' ? 'Sorted by date, newest first. Sort by name' : 'Sorted by name. Sort by date'}
+              onClick={() => app.set({ collectionSort: collectionSort === 'date' ? 'name' : 'date' })}
+            >
+              {collectionSort === 'date' ? <CalendarDays size={14} /> : <ArrowDownAZ size={14} />}
+            </IconButton>
+            <IconButton title="New collection from selection" onClick={newCollection}>
+              <FolderPlus size={14} />
+            </IconButton>
+          </>
         }
       >
-        {!collections.length && <div className="hint">Create a collection, then drag photos onto it.</div>}
+        {!collections.length && <div className="hint">Create a collection, then drag photos onto it. Or group the grid by event and name an event.</div>}
         <ul className="nav-list">
-          {collections.map((c) => {
-            const count = all.filter((p) => p.collections.includes(c.id)).length;
-            return (
+          {sorted.map((c) => {
+            const span = spans.get(c.id);
+            const year = span ? yearKey(span.end) : '';
+            const heading = collectionSort === 'date' && year !== lastYear;
+            lastYear = year;
+            return [
+              heading && (
+                <li key={`y:${year}`} className="nav-subhead" role="presentation">
+                  {year || 'No photos yet'}
+                </li>
+              ),
               <li
                 key={c.id}
-                className={cx(filter.source === 'collection' && filter.collection === c.id && 'active', dropTarget === c.id && 'drop-target')}
+                className={cx('coll', filter.source === 'collection' && filter.collection === c.id && 'active', dropTarget === c.id && 'drop-target')}
+                title={span ? `${c.name}: ${countLabel(span.count)}, ${formatDateRange(span.start, span.end)}` : c.name}
                 onClick={() => setSource('collection', c.id)}
                 onDragOver={(e) => {
                   if (e.dataTransfer.types.includes('application/x-lightshop-photos')) {
@@ -349,9 +522,12 @@ function CatalogPanel({ photos }: { photos: Photo[] }) {
                     }}
                   />
                 ) : (
-                  <span>{c.name}</span>
+                  <span className="coll-text">
+                    <span className="coll-name">{c.name}</span>
+                    {span && <span className="coll-date">{formatDateRange(span.start, span.end)}</span>}
+                  </span>
                 )}
-                <span className="count">{count}</span>
+                <span className="count">{span?.count ?? 0}</span>
                 <button
                   className="icon-btn"
                   style={{ width: 18, height: 18 }}
@@ -363,8 +539,8 @@ function CatalogPanel({ photos }: { photos: Photo[] }) {
                 >
                   <X size={12} />
                 </button>
-              </li>
-            );
+              </li>,
+            ];
           })}
         </ul>
         {filter.source === 'collection' && filter.collection && photos.length > 0 && (
@@ -567,7 +743,7 @@ function InfoPanel({ onExport }: { onExport: () => void }) {
 }
 
 export function LibraryView() {
-  const photos = useVisiblePhotos();
+  const { base, sections, ordered: photos } = useLibraryPhotos();
   const view = app.use((s) => s.libraryView);
   const activeId = app.use((s) => s.activeId);
   const [exporting, setExporting] = useState<string[] | null>(null);
@@ -581,6 +757,13 @@ export function LibraryView() {
       const sel = s.selected.length ? s.selected : s.activeId ? [s.activeId] : [];
       const idx = photos.findIndex((p) => p.id === s.activeId);
       const k = e.key.toLowerCase();
+      // The calendar has no selection; only the view switches apply (its days handle the arrow keys).
+      if (s.libraryView === 'calendar') {
+        if (modKey(e) || e.altKey) return;
+        if (k === 'g' || k === 'escape' || k === 'c') app.set({ libraryView: 'grid' });
+        else if (k === 'e') app.set({ libraryView: 'loupe' });
+        return;
+      }
       if (modKey(e) && k === 'a') {
         e.preventDefault();
         app.set({ selected: photos.map((p) => p.id) });
@@ -607,8 +790,16 @@ export function LibraryView() {
         if (!photos.length) return;
         const grid = document.querySelector('.grid') as HTMLElement | null;
         const cols = grid ? Math.max(1, getComputedStyle(grid).gridTemplateColumns.split(' ').length) : 1;
-        const step = k === 'arrowleft' ? -1 : k === 'arrowright' ? 1 : k === 'arrowup' ? (s.libraryView === 'grid' ? -cols : -1) : s.libraryView === 'grid' ? cols : 1;
-        const next = photos[Math.min(photos.length - 1, Math.max(0, (idx < 0 ? 0 : idx) + step))];
+        const vertical = k === 'arrowup' || k === 'arrowdown';
+        let next: Photo | null;
+        if (vertical && s.libraryView === 'grid' && sections.length > 1) {
+          // Date groups each start a new row, so ↑/↓ steps between them by position.
+          next = verticalNeighbour(sections, s.activeId, k === 'arrowdown', cols);
+        } else {
+          const step = k === 'arrowleft' ? -1 : k === 'arrowright' ? 1 : k === 'arrowup' ? (s.libraryView === 'grid' ? -cols : -1) : s.libraryView === 'grid' ? cols : 1;
+          next = photos[Math.min(photos.length - 1, Math.max(0, (idx < 0 ? 0 : idx) + step))];
+        }
+        if (!next) return;
         if (e.shiftKey) app.set({ activeId: next.id, selected: [...new Set([...s.selected, next.id])] });
         else app.set({ activeId: next.id, selected: [next.id] });
         return;
@@ -622,6 +813,7 @@ export function LibraryView() {
       if (k === 'x') return setFlag(sel, -1);
       if (k === 'u') return setFlag(sel, 0);
       if (k === 'g') return app.set({ libraryView: 'grid' });
+      if (k === 'c') return showCalendar();
       if (k === 'e' || k === ' ') {
         e.preventDefault();
         return app.set({ libraryView: s.libraryView === 'grid' || k === 'e' ? 'loupe' : 'grid' });
@@ -636,16 +828,22 @@ export function LibraryView() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [photos]);
+  }, [photos, sections]);
 
   return (
     <div className="lib">
       <aside className="side left">
-        <CatalogPanel photos={photos} />
+        <CatalogPanel photos={photos} base={base} />
       </aside>
       <main className="lib-center">
         <FilterBar />
-        {view === 'grid' ? <Grid photos={photos} /> : <Loupe photo={active ?? photos[0]} />}
+        {view === 'calendar' ? (
+          base.length ? <CalendarView photos={base} /> : <EmptyState />
+        ) : view === 'grid' ? (
+          <Grid sections={sections} photos={photos} />
+        ) : (
+          <Loupe photo={active ?? photos[0]} />
+        )}
       </main>
       <aside className="side right">
         <InfoPanel onExport={() => setExporting(app.get().selected.length ? app.get().selected : activeId ? [activeId] : [])} />

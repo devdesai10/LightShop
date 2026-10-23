@@ -1,5 +1,6 @@
 // Global application state: catalog (photos, collections, presets), library view state, toasts.
 
+import { dayKey } from '../lib/dates';
 import { dbDelete, dbDeleteMany, dbGet, dbGetAll, dbPut, requestPersistence } from '../lib/db';
 import { ExifSummary, parseExifDate, parseJpegExif } from '../lib/exif';
 import { SUPPORTED_IMAGE_EXT, decodeImage, makeThumbnail, mimeFor } from '../lib/imageio';
@@ -59,9 +60,14 @@ export interface LibraryFilter {
   label: ColorLabel | 'any';
   source: 'all' | 'recent' | 'edited' | 'collection';
   collection: string | null;
+  /** Capture date: a year, month or day key ('2026', '2026-03', '2026-03-14'; see lib/dates). */
+  date: string | null;
 }
 
 export type SortKey = 'captured' | 'imported' | 'name' | 'rating';
+/** How the Library grid is split into sections. */
+export type GroupBy = 'none' | 'event' | 'day' | 'month' | 'year';
+export type LibraryViewMode = 'grid' | 'loupe' | 'calendar';
 
 export interface AppState {
   ready: boolean;
@@ -74,12 +80,40 @@ export interface AppState {
   filter: LibraryFilter;
   sort: SortKey;
   sortDesc: boolean;
-  libraryView: 'grid' | 'loupe';
+  libraryView: LibraryViewMode;
+  groupBy: GroupBy;
+  /** Events: a new one starts after a gap of more than this many hours between photos. */
+  eventGapHours: number;
+  collectionSort: 'date' | 'name';
+  calendarMode: 'month' | 'year';
+  /** Month the calendar shows ('YYYY-MM'); null = the month of the newest photo. */
+  calendarMonth: string | null;
   thumbSize: number;
   importing: { done: number; total: number; current: string } | null;
   lastImport: string[];
   toasts: Toast[];
   clipboard: Partial<DevelopSettings> | null;
+}
+
+// Library organisation preferences, kept between sessions.
+const PREFS_KEY = 'ls.library.prefs';
+type LibraryPrefs = Pick<AppState, 'groupBy' | 'eventGapHours' | 'collectionSort' | 'calendarMode'>;
+const GROUPINGS: GroupBy[] = ['none', 'event', 'day', 'month', 'year'];
+export const EVENT_GAPS = [1, 2, 3, 6, 12, 24];
+
+function loadPrefs(): LibraryPrefs {
+  let v: Partial<LibraryPrefs> = {};
+  try {
+    v = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') ?? {};
+  } catch {
+    /* ignore a damaged value */
+  }
+  return {
+    groupBy: GROUPINGS.includes(v.groupBy as GroupBy) ? (v.groupBy as GroupBy) : 'event',
+    eventGapHours: EVENT_GAPS.includes(v.eventGapHours as number) ? (v.eventGapHours as number) : 3,
+    collectionSort: v.collectionSort === 'name' ? 'name' : 'date',
+    calendarMode: v.calendarMode === 'year' ? 'year' : 'month',
+  };
 }
 
 export const app = createStore<AppState>({
@@ -90,16 +124,33 @@ export const app = createStore<AppState>({
   presets: [],
   activeId: null,
   selected: [],
-  filter: { text: '', minRating: 0, flag: 'all', label: 'any', source: 'all', collection: null },
+  filter: { text: '', minRating: 0, flag: 'all', label: 'any', source: 'all', collection: null, date: null },
   sort: 'captured',
   sortDesc: false,
   libraryView: 'grid',
+  ...loadPrefs(),
+  calendarMonth: null,
   thumbSize: 190,
   importing: null,
   lastImport: [],
   toasts: [],
   clipboard: null,
 });
+
+{
+  const pick = (s: AppState): LibraryPrefs => ({ groupBy: s.groupBy, eventGapHours: s.eventGapHours, collectionSort: s.collectionSort, calendarMode: s.calendarMode });
+  let saved = JSON.stringify(pick(app.get()));
+  app.subscribe(() => {
+    const next = JSON.stringify(pick(app.get()));
+    if (next === saved) return;
+    saved = next;
+    try {
+      localStorage.setItem(PREFS_KEY, next);
+    } catch {
+      /* storage full or unavailable: the preference just isn't remembered */
+    }
+  });
+}
 
 // ---------------------------------------------------------------- toasts
 export function toast(text: string, kind: Toast['kind'] = 'info', ms = 3500) {
@@ -441,6 +492,16 @@ export async function deletePreset(id: string) {
 }
 
 // ---------------------------------------------------------------- filtering
+/** When a photo was taken (falls back to when it was imported). */
+export const photoTime = (p: Photo) => p.capturedAt ?? p.importedAt;
+/** Whether a photo was taken in the year, month or day a date key names. */
+export const matchesDate = (p: Photo, key: string) => dayKey(photoTime(p)).startsWith(key);
+
+/** Shows the photos of one year, month or day ('2026', '2026-03', '2026-03-14') in the grid. */
+export function openDate(key: string) {
+  app.set((s) => ({ filter: { ...s.filter, date: key }, libraryView: 'grid' }));
+}
+
 export function filterPhotos(s: Pick<AppState, 'photos' | 'filter' | 'sort' | 'sortDesc' | 'lastImport'>): Photo[] {
   const f = s.filter;
   const text = f.text.trim().toLowerCase();
@@ -458,6 +519,7 @@ export function filterPhotos(s: Pick<AppState, 'photos' | 'filter' | 'sort' | 's
       const hay = [p.name, p.exif?.make, p.exif?.model, p.exif?.lens, ...p.keywords].join(' ').toLowerCase();
       if (!hay.includes(text)) return false;
     }
+    if (f.date && !matchesDate(p, f.date)) return false;
     return true;
   });
   const dir = s.sortDesc ? -1 : 1;
@@ -467,7 +529,7 @@ export function filterPhotos(s: Pick<AppState, 'photos' | 'filter' | 'sort' | 's
     if (key === 'name') d = a.name.localeCompare(b.name, undefined, { numeric: true });
     else if (key === 'rating') d = a.rating - b.rating;
     else if (key === 'imported') d = a.importedAt - b.importedAt;
-    else d = (a.capturedAt ?? a.importedAt) - (b.capturedAt ?? b.importedAt);
+    else d = photoTime(a) - photoTime(b);
     if (d === 0) d = a.importedAt - b.importedAt;
     return d * dir;
   });

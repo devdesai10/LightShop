@@ -2,7 +2,7 @@
 
 A photo library, non-destructive RAW-style developer and layered image editor in one app. It pairs a Lightroom-style **Library** and **Develop** module with a Photoshop-style **Editor**, and runs in the browser or as a macOS desktop app.
 
-**Current version: 2.2**. See [What's new](#whats-new).
+**Current version: 2.3**. See [What's new](#whats-new).
 
 Your photos stay on your computer: LightShop works offline and stores its catalog locally.
 
@@ -10,9 +10,12 @@ Your photos stay on your computer: LightShop works offline and stores its catalo
 
 ### Library
 - Import JPEG, PNG, WebP, AVIF, GIF, BMP and camera RAW files (CR2, CR3, NEF, ARW, DNG, RAF, ORF, RW2 and more) with the Import button or by dropping files on the window.
-- Grid and loupe views with a histogram and EXIF metadata.
+- Grid, loupe and calendar views with a histogram and EXIF metadata.
+- **Events and date groups:** the grid can be grouped by event, day, month or year. An event is a run of photos taken close together; you choose how long a gap starts a new one (1 hour to 1 day). Name an event to save it as a collection.
+- **Dates panel:** your photos by year, month and day, with counts. Click a date to show only that period.
+- **Calendar (C):** a month view with a cover photo and count on every day you took photos, or a whole year shaded by how many photos each day has. Click a day to see its photos.
 - Star ratings, pick/reject flags, color labels and keywords.
-- Collections, plus the built-in All Photographs, Previous Import and Edited.
+- Collections, sorted by date (under year headings) or by name, each showing the dates it covers. Plus the built-in All Photographs, Previous Import and Edited.
 - Search, filtering and sorting. Pinch the grid to resize thumbnails.
 - Quick Develop applies a preset to every selected photo.
 - Batch export to JPEG, PNG or WebP, with quality, long-edge resize and file-name suffix options.
@@ -97,13 +100,14 @@ The version comes from `package.json`. To release, bump it with `npm version <x.
 ```
 src/
   App.tsx        Top bar, module switcher, drag-and-drop import
-  library/       Library module: grid, loupe, filters, metadata, collections
+  library/       Library module: grid, loupe, calendar, filters, metadata, collections,
+                 events and date grouping (grouping.ts), Dates panel
   develop/       Develop module: WebGL2 renderer and shaders, settings and presets,
                  Touch Up (retouch.ts), masks, crop, Navigator, history
   editor/        Editor module: document model and undo history, tools, layers,
                  adjustments, filters, menus, Develop → Editor sync (session.ts)
   lib/           Image decoding, EXIF, RAW previews, PSD, XMP presets, color math,
-                 trackpad gestures, IndexedDB
+                 date labels and calendar math, trackpad gestures, IndexedDB
   state/         App store: catalog, photos, collections, presets
   ui/            Shared controls, dialogs, export dialog, error boundary
 electron/        Desktop shell: main process and preload bridge
@@ -126,6 +130,16 @@ build/, public/  App icons and web manifest
 - **Desktop app:** the Electron shell serves the built app from a private `app://` origin with a strict Content Security Policy. The page runs sandboxed with no Node.js access.
 
 ## What's new
+
+### 2.3: Events, dates and calendar
+- **Group by event:** the Library grid is now split into events, photos taken close together in time, each under a header with its date, time span and photo count. Choose when a new event starts, from a 1 hour to a 1 day gap. Group by day, month or year instead, or turn grouping off.
+- **Name an event:** saves the whole event as a collection, and the name then appears in the grid header. **Select** in a header selects that group's photos.
+- **Dates panel:** browse by year, month and day in the left sidebar. Picking a date shows only those photos, and the chip in the filter bar clears it.
+- **Calendar view (C):** every day with photos shows its best one (highest rated, then picked) and how many there are. Year mode shades each day by how many photos it has. Click a day to open it in the grid. It works with the keyboard too: arrow keys, Home/End and Page Up/Down.
+- **Collections are date-aware:** they're sorted by date under year headings (or by name), each shows the dates it covers, and a new collection is named after its photos' dates.
+- Up and down arrows in a grouped grid move straight across group boundaries.
+- The filter bar fits narrower windows: the view switcher sits at the top left, and the arrange controls move to a second row when needed.
+- Grouping, event gap, collection order and calendar mode are remembered.
 
 ### 2.2: Better Auto Tone and Auto White Balance
 - **Auto Tone judges exposure by the scene:** it takes into account whether a scene is mostly dark or mostly bright, instead of pushing every photo to the same average. Badly under- or overexposed photos are corrected fully, while photos that are nearly right only get a nudge.
@@ -170,6 +184,7 @@ build/, public/  App icons and web manifest
 - PSD support covers 8-bit RGB and grayscale with pixel layers. Type and adjustment layers are saved as pixels.
 - Editor documents stay in memory until you choose **Save to Library**. LightShop warns before you quit with unsaved documents.
 - Pinch zoom in Safari is handled but untested. The desktop app and Chromium browsers (Chrome, Brave, Edge) are tested.
+- Events are worked out from capture times only, not locations. Photos without an EXIF date use the file's modified time. Named events are stored as collections.
 
 ---
 
