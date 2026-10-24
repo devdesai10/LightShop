@@ -1,6 +1,7 @@
 // Editor exports. File → Export As asks where to save (a Save dialog in the desktop app) and writes the chosen
 // format there. Quick Export saves a JPEG, or a PNG when the image has transparent areas, to Downloads in one
-// click. Both say where the file went, with a button to show it in Finder. The browser build downloads instead.
+// click. Both say where the file went, with a button to show it in Finder (or Explorer). The browser build
+// downloads instead.
 
 import { toast } from '../state/app';
 import { canvasToBlob } from '../lib/imageio';
@@ -55,18 +56,21 @@ const bytes = async (b: Blob) => new Uint8Array(await b.arrayBuffer());
 const fileName = (doc: EditorDoc, ext: string) => `${doc.name || 'Untitled'}.${ext}`;
 
 function report(r: SaveResult, how: 'dialog' | 'quick') {
+  const mac = desktop?.platform === 'darwin';
   if (r.ok) {
     const reveal = desktop?.revealFile;
     toast(
       `Exported "${r.name}" to ${r.folder}`,
       'success',
       7000,
-      reveal ? { label: desktop?.platform === 'darwin' ? 'Show in Finder' : 'Show in Folder', run: () => reveal(r.token) } : undefined,
+      reveal ? { label: mac ? 'Show in Finder' : desktop?.platform === 'win32' ? 'Show in Explorer' : 'Show in Folder', run: () => reveal(r.token) } : undefined,
     );
   } else if (r.error === 'denied') {
     toast(
       how === 'quick'
-        ? `LightShop isn't allowed to save in ${r.folder}. Allow it in System Settings → Privacy & Security → Files & Folders, or use File → Export As to choose a folder.`
+        ? mac
+          ? `LightShop isn't allowed to save in ${r.folder}. Allow it in System Settings → Privacy & Security → Files & Folders, or use File → Export As to choose a folder.`
+          : `LightShop isn't allowed to save in ${r.folder}. Use File → Export As to choose another folder.`
         : `LightShop isn't allowed to save in ${r.folder}. Choose another folder.`,
       'error',
       10000,

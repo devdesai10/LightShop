@@ -5,7 +5,7 @@ import {
 import { app, toast } from '../state/app';
 import { useEmitter } from '../state/store';
 import { checkerPattern, decodeImage, createCanvas, ctx2d } from '../lib/imageio';
-import { isMac, isTypingTarget, modKey, modLabel, pickFiles } from '../lib/util';
+import { isMac, isTypingTarget, keyLabel, modKey, pickFiles } from '../lib/util';
 import { Button, IconButton, cx } from '../ui/controls';
 import { tipProps } from '../ui/Tooltip';
 import { defaultAdjustment } from './adjust';
@@ -28,9 +28,9 @@ const ALT = isMac ? '⌥' : 'Alt';
 /** The toolbox, top to bottom: name, shortcut keys and what it does (shown when hovering). `sep` starts a group. */
 const TOOL_LIST: { id: ToolId; label: string; keys: string[]; tip: string; icon: React.ReactNode; sep?: boolean }[] = [
   { id: 'move', label: 'Move', keys: ['V'], tip: "Drag to move the layer or the selected pixels. Drag onto another document's tab to copy it there.", icon: <Move size={17} /> },
-  { id: 'scale', label: 'Scale', keys: ['K', `${modLabel}T`], tip: `Drag a handle to resize the layer or the selected pixels. Shift frees the proportions; ${ALT} scales from the center.`, icon: <Scaling size={17} /> },
-  { id: 'marquee', label: 'Marquee', keys: ['M'], tip: `Drag to select a rectangle or an ellipse (⇧M switches). Shift adds to the selection; ${ALT} subtracts.`, icon: <SquareDashed size={17} /> },
-  { id: 'lasso', label: 'Lasso', keys: ['L'], tip: 'Drag to draw a freehand selection. ⇧L switches to straight sides (polygonal).', icon: <Lasso size={17} /> },
+  { id: 'scale', label: 'Scale', keys: ['K', '⌘T'], tip: `Drag a handle to resize the layer or the selected pixels. Shift frees the proportions; ${ALT} scales from the center.`, icon: <Scaling size={17} /> },
+  { id: 'marquee', label: 'Marquee', keys: ['M'], tip: `Drag to select a rectangle or an ellipse (${keyLabel('⇧M')} switches). Shift adds to the selection; ${ALT} subtracts.`, icon: <SquareDashed size={17} /> },
+  { id: 'lasso', label: 'Lasso', keys: ['L'], tip: `Drag to draw a freehand selection. ${keyLabel('⇧L')} switches to straight sides (polygonal).`, icon: <Lasso size={17} /> },
   { id: 'wand', label: 'Magic Wand', keys: ['W'], tip: 'Click to select an area of similar color.', icon: <WandSparkles size={17} /> },
   { id: 'crop', label: 'Crop', keys: ['C'], tip: 'Drag to crop. Drag past the edges, or pick a size, to expand the canvas.', icon: <Crop size={17} />, sep: true },
   { id: 'eyedropper', label: 'Eyedropper', keys: ['I'], tip: `Click to pick the foreground color; ${ALT}-click picks the background color.`, icon: <Pipette size={17} /> },
@@ -242,7 +242,7 @@ function OptionsBar({ doc }: { doc: EditorDoc | null }) {
             <option value="center">Center</option>
             <option value="right">Right</option>
           </select>
-          <span className="muted">Click to type · {`⌘↩`} to commit · Esc to cancel</span>
+          <span className="muted">Click to type · {keyLabel('⌘↩')} to commit · Esc to cancel</span>
         </>
       );
       break;
@@ -831,7 +831,7 @@ export function EditorView() {
           ) : busy ? null : (
             <div className="empty" style={{ gridRow: '2 / 4' }}>
               <h3>No open documents</h3>
-              <div>Open a photo from the Library (⌘E), start a blank canvas, or open an image / PSD file.</div>
+              <div>Open a photo from the Library ({keyLabel('⌘E')}), start a blank canvas, or open an image / PSD file.</div>
               <div className="row">
                 <Button primary onClick={() => openDialog({ kind: 'new' })}>
                   <FilePlus size={14} /> New…
@@ -854,7 +854,7 @@ export function EditorView() {
                   className="grow"
                   onClick={() => saveDocToLibrary(doc)}
                   tipSide="bottom"
-                  tip={{ title: 'Save to Library', keys: [`${modLabel}S`], text: 'Saves the flattened image to the Library, keeping its layers so you can carry on editing later.' }}
+                  tip={{ title: 'Save to Library', keys: ['⌘S'], text: 'Saves the flattened image to the Library, keeping its layers so you can carry on editing later.' }}
                 >
                   <Save size={13} /> Save to Library
                 </Button>

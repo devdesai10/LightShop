@@ -1,6 +1,6 @@
 # LightShop
 
-A photo library, non-destructive RAW-style developer and layered image editor in one app. It pairs a Lightroom-style **Library** and **Develop** module with a Photoshop-style **Editor**, and runs in the browser or as a macOS desktop app.
+A photo library, non-destructive RAW-style developer and layered image editor in one app. It pairs a Lightroom-style **Library** and **Develop** module with a Photoshop-style **Editor**, and runs in the browser or as a desktop app for macOS and Windows.
 
 **Current version: 2.6**. See [What's new](#whats-new).
 
@@ -78,6 +78,16 @@ Download the DMG from the [latest release](https://github.com/devdesai10/LightSh
 
 The desktop app keeps its catalog in `~/Library/Application Support/LightShop` (**Help → Show App Data in Finder**). It is separate from any catalog in a browser. Exports go to a folder you choose, or straight to `~/Downloads`.
 
+## Install the Windows app
+
+For 64-bit Windows 10 and 11. Download `LightShop-<version>-win-x64.zip` from the [latest release](https://github.com/devdesai10/LightShop/releases/latest), or build it yourself with `npm run dist:win` (this works on a Mac too). Then:
+
+1. Right-click the zip and choose **Extract All**. LightShop can't run from inside the zip.
+2. Open the extracted **LightShop** folder and double-click **LightShop.exe**. You can move the folder anywhere first, for example into your user folder, and pin LightShop to Start or the taskbar once it's running.
+3. The app isn't code-signed, so the first launch may show **Windows protected your PC** (SmartScreen). Click **More info**, then **Run anyway**.
+
+To update, quit LightShop and replace the LightShop folder with the new one. The catalog is kept separately, in `%APPDATA%\LightShop`. Shortcuts use Ctrl where the Mac uses ⌘, and Alt for ⌥.
+
 ## Development
 
 Requires Node.js 22 or newer (tested with 22.20) and npm.
@@ -95,8 +105,9 @@ npm run dev        # http://localhost:5173
 | `npm run preview` | Serves the production build locally |
 | `npm run desktop` | Builds, then opens the Electron desktop app |
 | `npm run dist:mac` | Builds `LightShop.app` and `release/LightShop-<version>-arm64.dmg` (`LS_ARCH=x64 npm run dist:mac` for Intel Macs) |
+| `npm run dist:win` | Builds `release/LightShop-<version>-win-x64.zip` with `LightShop.exe` (`LS_ARCH=arm64 npm run dist:win` for Windows on Arm). Runs on macOS, Windows or Linux |
 
-The version comes from `package.json`. To release, bump it with `npm version <x.y.z> --no-git-tag-version` and run `npm run dist:mac`. The DMG file name, its disk name and the About box show the new version.
+The version comes from `package.json`. To release, bump it with `npm version <x.y.z> --no-git-tag-version` and run `npm run dist:mac` and `npm run dist:win`. The DMG file name, its disk name and the About box show the new version, and so do the zip's name and LightShop.exe's file properties.
 
 ### Project structure
 
@@ -117,7 +128,8 @@ src/
   state/         App store: catalog, photos, collections, presets
   ui/            Shared controls, dialogs, export dialog, error boundary, tool tooltips
 electron/        Desktop shell: main process and preload bridge
-scripts/         build-mac.mjs: packages the app, signs it and makes the DMG
+scripts/         build-mac.mjs: packages the app, signs it and makes the DMG;
+                 build-win.mjs: packages LightShop.exe and makes the Windows zip
 build/, public/  App icons and web manifest
 .kiro/hooks/     Kiro IDE hook that plays a chime when an agent command needs approval
 ```
@@ -134,7 +146,7 @@ build/, public/  App icons and web manifest
   A preview of up to 2560 px is used for editing. The full-resolution image loads when you zoom in past it, and for export.
 - **Editor:** a Canvas 2D compositor handles masks, blend modes and adjustment layers. Undo history has a memory budget. PSD reading and writing are implemented from Adobe's published file-format specification.
 - **Content-Aware fill:** PatchMatch nearest-neighbour search with iterative patch voting, run coarse to fine on an image pyramid (after Barnes et al., 2009, and Wexler et al., 2007). A layout term favours patches from the same rows or columns as the new pixels. It runs in a Web Worker, so the app stays responsive.
-- **Desktop app:** the Electron shell serves the built app from a private `app://` origin with a strict Content Security Policy. The page runs sandboxed with no Node.js access.
+- **Desktop app:** the Electron shell serves the built app from a private `app://` origin with a strict Content Security Policy. The page runs sandboxed with no Node.js access. The same shell runs on macOS and Windows.
 
 ## What's new
 
@@ -144,6 +156,7 @@ build/, public/  App icons and web manifest
 - **Every export says where it went,** with a **Show in Finder** button. If LightShop isn't allowed to save in a folder, it tells you.
 - **Fixed:** moving the pointer diagonally from **Export As** down to **Photoshop (PSD)** could close the submenu on the way. Menus now wait a moment before switching to another submenu.
 - The **Adjustment…** menu at the top of the right column made room for Quick Export. Add adjustment layers with **+ Adjustment…** in the Layers panel, or **Layer → New Adjustment Layer**.
+- **Windows version:** LightShop now also comes for 64-bit Windows 10 and 11, as a zip with **LightShop.exe** (see [Install the Windows app](#install-the-windows-app)). On Windows, menus, tooltips and hints show shortcuts as Ctrl, Alt and Shift, and the Windows menu bar is hidden because LightShop has its own menus.
 
 ### 2.5: Scale tool and tool tooltips
 - **New Scale tool (K, or ⌘T in the desktop app):** it's second in the Editor's toolbox. Handles surround the active layer's pixels, or the selected pixels when there's a selection.
@@ -227,8 +240,9 @@ build/, public/  App icons and web manifest
 - PSD support covers 8-bit RGB and grayscale with pixel layers. Type and adjustment layers are saved as pixels.
 - Editor documents stay in memory until you choose **Save to Library**. LightShop warns before you quit with unsaved documents.
 - Layer masks don't move or scale with their layer. The Scale tool doesn't rotate or skew. Scaling selected pixels leaves the layer canvas-sized, and a layer scaled past 64 megapixels keeps only the part over the canvas.
-- In the browser version, ⌘T opens a new browser tab instead of the Scale tool; press K there.
+- In the browser version, ⌘T (Ctrl+T on Windows) opens a new browser tab instead of the Scale tool; press K there.
 - Pinch zoom in Safari is handled but untested. The desktop app and Chromium browsers (Chrome, Brave, Edge) are tested.
+- The Windows app is new in 2.6 and has had much less testing than the Mac app. It isn't code-signed, has no installer (it's a folder you extract) and doesn't update itself.
 - Events are worked out from capture times only, not locations. Photos without an EXIF date use the file's modified time. Named events are stored as collections.
 - Content-Aware fills take a few seconds for a laptop-sized wallpaper and up to about 15 seconds at Pro Display XDR size (6016 × 3384) on an M1. Results above 24 megapixels are filled at a lower resolution and enlarged, and the Crop tool's largest result is 64 megapixels.
 - Content-Aware works best on landscapes, skies and textures. It copies patches of the photo rather than inventing new content, so faces, text and other distinct objects at the edges can come out repeated or distorted. Blurred Photo is the safer choice for those.

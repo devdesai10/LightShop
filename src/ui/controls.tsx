@@ -1,6 +1,7 @@
 import { ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Star, X } from 'lucide-react';
 import { TipContent, TipSide, tipProps } from './Tooltip';
+import { keyLabel } from '../lib/util';
 
 export function cx(...c: (string | false | null | undefined)[]) {
   return c.filter(Boolean).join(' ');
@@ -170,7 +171,7 @@ export function IconButton({
   return (
     <button
       className={cx('icon-btn', active && 'active', className)}
-      title={rich ? undefined : shortcut ? `${title} (${shortcut})` : title}
+      title={rich ? undefined : shortcut ? `${title} (${keyLabel(shortcut)})` : title}
       aria-label={title}
       aria-pressed={active}
       onClick={onClick}

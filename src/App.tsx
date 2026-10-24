@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Images, Layers, SlidersHorizontal, Upload } from 'lucide-react';
 import { Module, app, importFiles, initApp, isImportable, setModule } from './state/app';
 import { storageEstimate } from './lib/db';
-import { formatBytes, modKey } from './lib/util';
+import { formatBytes, keyLabel, modKey } from './lib/util';
 import { Button, cx } from './ui/controls';
 import { LibraryView, promptImport } from './library/LibraryView';
 import { DevelopView } from './develop/DevelopView';
@@ -14,9 +14,9 @@ import { TooltipHost } from './ui/Tooltip';
 import { preventPageZoom } from './lib/gestures';
 
 const MODULES: { id: Module; label: string; hint: string; icon: React.ReactNode }[] = [
-  { id: 'library', label: 'Library', hint: 'Organize, rate and filter (⌥⌘1)', icon: <Images size={15} /> },
-  { id: 'develop', label: 'Develop', hint: 'Non-destructive RAW-style editing (⌥⌘2)', icon: <SlidersHorizontal size={15} /> },
-  { id: 'editor', label: 'Editor', hint: 'Layers, brushes, selections and retouching (⌥⌘3)', icon: <Layers size={15} /> },
+  { id: 'library', label: 'Library', hint: `Organize, rate and filter (${keyLabel('⌥⌘1')})`, icon: <Images size={15} /> },
+  { id: 'develop', label: 'Develop', hint: `Non-destructive RAW-style editing (${keyLabel('⌥⌘2')})`, icon: <SlidersHorizontal size={15} /> },
+  { id: 'editor', label: 'Editor', hint: `Layers, brushes, selections and retouching (${keyLabel('⌥⌘3')})`, icon: <Layers size={15} /> },
 ];
 
 /** Module switch; entering the Editor from Develop brings the photo being developed along. */

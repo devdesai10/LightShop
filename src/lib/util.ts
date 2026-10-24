@@ -99,6 +99,31 @@ export const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(
 export const modKey = (e: { metaKey: boolean; ctrlKey: boolean }) => (isMac ? e.metaKey : e.ctrlKey);
 export const modLabel = isMac ? '⌘' : 'Ctrl+';
 
+const KEY_NAMES: Record<string, string> = { '⌫': 'Backspace', '⌦': 'Delete', '↩': 'Enter', '⎋': 'Esc', '+': 'Plus', '−': 'Minus', '-': 'Minus' };
+
+/**
+ * A shortcut written with Mac symbols ("⇧⌘E", "⌥⌫", "⌘↩"), shown the way this platform writes it: unchanged
+ * on a Mac, "Ctrl+Shift+E", "Alt+Backspace" and "Ctrl+Enter" elsewhere. ⌘ is Ctrl there, as in modKey.
+ */
+export function keyLabel(mac: string): string {
+  if (isMac) return mac;
+  let ctrl = false;
+  let alt = false;
+  let shift = false;
+  let i = 0;
+  for (; i < mac.length; i++) {
+    const c = mac[i];
+    if (c === '⌘' || c === '⌃') ctrl = true;
+    else if (c === '⌥') alt = true;
+    else if (c === '⇧') shift = true;
+    else break;
+  }
+  const key = mac.slice(i);
+  // A lone ⌫ (clear, delete) works with Delete too, the key Windows keyboards call that.
+  const name = key === '⌫' && !ctrl && !alt && !shift ? 'Delete' : (KEY_NAMES[key] ?? key);
+  return [ctrl && 'Ctrl', alt && 'Alt', shift && 'Shift', name].filter(Boolean).join('+');
+}
+
 export function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
   const tag = t.tagName;

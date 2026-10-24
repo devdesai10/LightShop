@@ -17,7 +17,7 @@ interface DesktopApi {
   writeSaveFile?(token: string, data: Uint8Array): Promise<SaveResult>;
   /** Saves a new file in the Downloads folder (numbered when the name is taken). */
   quickSave?(o: { name: string; data: Uint8Array }): Promise<SaveResult>;
-  /** Shows a saved file in Finder. */
+  /** Shows a saved file in Finder (Explorer on Windows). */
   revealFile?(token: string): void;
 }
 

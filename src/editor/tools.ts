@@ -2,6 +2,7 @@
 
 import { checkerPattern, createCanvas, ctx2d } from '../lib/imageio';
 import { rgb255ToHex } from '../lib/color';
+import { isMac } from '../lib/util';
 import { toast } from '../state/app';
 import { createStore } from '../state/store';
 import { coversDoc, ensureCovers, insertLayer } from './actions';
@@ -143,7 +144,7 @@ function startStroke(kind: PaintKind, e: ToolEvent, c: ToolCtx) {
   if (kind === 'clone') {
     const srcPt = st.cloneSource;
     if (!srcPt) {
-      toast('Alt-click (Option-click) to set the clone source first');
+      toast(isMac ? 'Option-click to set the clone source first' : 'Alt-click to set the clone source first');
       stroke = null;
       return;
     }

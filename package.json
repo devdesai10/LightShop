@@ -12,7 +12,8 @@
     "typecheck": "tsc -b",
     "preview": "vite preview",
     "desktop": "npm run build && electron .",
-    "dist:mac": "node scripts/build-mac.mjs"
+    "dist:mac": "node scripts/build-mac.mjs",
+    "dist:win": "node scripts/build-win.mjs"
   },
   "devDependencies": {
     "@electron/packager": "20.3.0",

@@ -39,6 +39,8 @@ protocol.registerSchemesAsPrivileged([
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
+// Windows groups taskbar buttons and notifications by this ID (the same as the macOS bundle ID).
+if (process.platform === 'win32') app.setAppUserModelId('dev.lightshop.app');
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
@@ -108,12 +110,14 @@ function isDir(p) {
 
 /** A file name the page suggested, made safe: no folders, no characters file systems reject, extension `ext`. */
 function safeFileName(name, ext) {
-  const base = path
-    .basename(String(name ?? ''))
+  let base = path
+    .basename(String(name ?? '').replace(/\\/g, '/'))
     .replace(/\.(png|jpe?g|webp|psd)$/i, '')
     .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-')
     .replace(/^[\s.]+|[\s.]+$/g, '')
     .slice(0, 200);
+  // Windows can't create files named like devices ("CON.png", "com1.jpg").
+  if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(base)) base += '_';
   return `${base || 'Untitled'}.${ext}`;
 }
 
@@ -231,6 +235,9 @@ function createWindow() {
       spellcheck: false,
     },
   });
+  // Windows and Linux draw the menu in the window, above the app's own top bar and menus. Hide it there
+  // (its shortcuts still work), and don't let a lone Alt bring it up: Alt is a tool modifier in the Editor.
+  if (process.platform !== 'darwin') win.setMenuBarVisibility(false);
   win.once('ready-to-show', () => win.show());
   win.loadURL(`${ORIGIN}/index.html`);
 
@@ -291,7 +298,7 @@ function buildMenu() {
       role: 'help',
       submenu: [
         {
-          label: 'Show App Data in Finder',
+          label: isMac ? 'Show App Data in Finder' : process.platform === 'win32' ? 'Show App Data in Explorer' : 'Show App Data Folder',
           click: () => shell.openPath(app.getPath('userData')),
         },
       ],

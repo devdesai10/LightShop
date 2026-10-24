@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { app } from '../state/app';
-import { modLabel, pickFiles } from '../lib/util';
+import { keyLabel, pickFiles } from '../lib/util';
 import { cx } from '../ui/controls';
 import { ADJ_LABELS, AdjType, defaultAdjustment } from './adjust';
 import * as A from './actions';
@@ -15,7 +15,8 @@ import { fitView, zoomBy, setActualPixels } from './viewState';
 
 export type MenuItem = { label: string; sc?: string; run?: () => void; disabled?: boolean; sub?: MenuItem[] } | '-';
 
-const M = modLabel;
+/** Shortcuts are written the Mac way here and shown the platform's way (keyLabel). */
+const M = '⌘';
 const ADJ_TYPES = Object.keys(ADJ_LABELS) as AdjType[];
 
 export function buildMenus(doc: EditorDoc | null): { label: string; items: MenuItem[] }[] {
@@ -208,7 +209,7 @@ function MenuList({ items, onDone }: { items: MenuItem[]; onDone: () => void }) 
               }}
             >
               {it.label}
-              {it.sc && <span className="sc">{it.sc}</span>}
+              {it.sc && <span className="sc">{keyLabel(it.sc)}</span>}
               {it.sub && <ChevronRight size={12} style={{ marginLeft: 'auto' }} />}
             </button>
             {it.sub && openSub === i && !it.disabled && <MenuList items={it.sub} onDone={onDone} />}

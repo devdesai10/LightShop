@@ -9,7 +9,7 @@ import {
 } from '../state/app';
 import { countLabel, formatDateRange, formatKey, parseKey, yearKey } from '../lib/dates';
 import { formatShutter } from '../lib/exif';
-import { formatBytes, isTypingTarget, modKey, pickFiles } from '../lib/util';
+import { formatBytes, isTypingTarget, keyLabel, modKey, pickFiles } from '../lib/util';
 import { Button, IconButton, Modal, Panel, Segmented, Stars, cx } from '../ui/controls';
 import { ExportDialog } from '../ui/ExportDialog';
 import { HistogramView } from '../ui/widgets';
@@ -652,10 +652,10 @@ function InfoPanel({ onExport }: { onExport: () => void }) {
           <Button small onClick={() => openInDevelop(p.id)} title="Develop (D)">
             <SlidersHorizontal size={13} /> Develop
           </Button>
-          <Button small onClick={() => openPhotoInEditor(p.id)} title="Edit in Editor (⌘E)">
+          <Button small onClick={() => openPhotoInEditor(p.id)} title={`Edit in Editor (${keyLabel('⌘E')})`}>
             <Pencil size={13} /> Edit in Editor
           </Button>
-          <Button small onClick={onExport} title="Export (⇧⌘E)">
+          <Button small onClick={onExport} title={`Export (${keyLabel('⇧⌘E')})`}>
             Export…
           </Button>
           <Button

@@ -6,10 +6,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { createStore } from '../state/store';
+import { isMac, keyLabel } from '../lib/util';
 
 export interface TipContent {
   title: string;
-  /** Shortcuts as printed on the keys, e.g. ['V'] or ['K', '⌘T']. */
+  /** Shortcuts written with Mac symbols, e.g. ['V'] or ['K', '⌘T']; shown the platform's way (see keyLabel). */
   keys?: string[];
   /** What it does, in a sentence or two. */
   text?: string;
@@ -56,7 +57,7 @@ export function hideTip(anchor?: HTMLElement) {
 /** The shortcuts in aria-keyshortcuts form ("Shift+G", "Meta+T"; alternatives separated by spaces). */
 function ariaKeys(keys: string[]) {
   return keys
-    .map((k) => k.replace('Ctrl+', 'Control+').replace(/⌘/g, 'Meta+').replace(/⇧/g, 'Shift+').replace(/⌥/g, 'Alt+').replace(/\s+/g, ''))
+    .map((k) => k.replace('Ctrl+', 'Control+').replace(/⌘/g, isMac ? 'Meta+' : 'Control+').replace(/⌃/g, 'Control+').replace(/⇧/g, 'Shift+').replace(/⌥/g, 'Alt+').replace(/\s+/g, ''))
     .join(' ');
 }
 
@@ -141,7 +142,7 @@ export function TooltipHost() {
         {c.keys && c.keys.length > 0 && (
           <span className="tip-keys">
             {c.keys.map((k) => (
-              <kbd key={k}>{k}</kbd>
+              <kbd key={k}>{keyLabel(k)}</kbd>
             ))}
           </span>
         )}

@@ -6,7 +6,7 @@ import {
 import { app, getPhoto, loadPhotoImage, setFlag, setRating, toast } from '../state/app';
 import { fitCanvas } from '../lib/imageio';
 import { wbForNeutral } from '../lib/color';
-import { deepClone, isTypingTarget, modKey, uid } from '../lib/util';
+import { deepClone, isMac, isTypingTarget, keyLabel, modKey, uid } from '../lib/util';
 import { Button, IconButton, Panel, Segmented, Slider, Stars, cx } from '../ui/controls';
 import { ExportDialog } from '../ui/ExportDialog';
 import { HistogramView } from '../ui/widgets';
@@ -1122,11 +1122,14 @@ function ZoomControls({ onFit, onActual }: { onFit: () => void; onActual: () => 
         value={value}
         onChange={(v) => (v === 'fit' ? onFit() : onActual())}
         options={[
-          { value: 'fit', label: 'Fit', title: 'Fit (Z, ⌘0)' },
-          { value: '1:1', label: '1:1', title: 'Actual pixels (Z, ⌘1)' },
+          { value: 'fit', label: 'Fit', title: `Fit (Z, ${keyLabel('⌘0')})` },
+          { value: '1:1', label: '1:1', title: `Actual pixels (Z, ${keyLabel('⌘1')})` },
         ]}
       />
-      <span className="zoom-readout" title="Pinch or ⌘-scroll to zoom · two-finger scroll or drag to move · ⌘+ / ⌘− to step">
+      <span
+        className="zoom-readout"
+        title={`Pinch or ${isMac ? '⌘' : 'Ctrl'}-scroll to zoom · two-finger scroll or drag to move · ${keyLabel('⌘+')} / ${keyLabel('⌘−')} to step`}
+      >
         {Math.round(scale * 100)}%
       </span>
     </>
@@ -1340,7 +1343,7 @@ function TouchUpPanel({
           </Button>
         )}
         {sp && (
-          <Button small onClick={() => onDelete(sp.id)} title="Delete the selected spot (⌫)">
+          <Button small onClick={() => onDelete(sp.id)} title={`Delete the selected spot (${keyLabel('⌫')})`}>
             <Trash size={12} /> Delete
           </Button>
         )}
@@ -1361,7 +1364,7 @@ function TouchUpPanel({
         {mode === 'redeye'
           ? 'Click each red pupil. Size the circle to cover the pupil; only red pixels change.'
           : 'Click a blemish, or drag to paint over a larger area. LightShop picks a matching source; drag the dashed circle to choose another.'}{' '}
-        [ ] change size, / new source, ⌫ deletes, hold Space to pan.
+        [ ] change size, / new source, {keyLabel('⌫')} deletes, hold Space to pan.
         {s.spots.length > 0 && ` ${s.spots.length} spot${s.spots.length === 1 ? '' : 's'}.`}
       </p>
     </Panel>
