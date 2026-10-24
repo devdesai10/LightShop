@@ -8,6 +8,7 @@ import { coversDoc, ensureCovers, insertLayer } from './actions';
 import { EditorDoc, PixelLayer, RasterLayer, Rect, SelectMode, combineSelection, isPixel, makeSelection, selectionFromShape } from './doc';
 import { ExpandFill, FILLS, cancelPreview, containBox, expandCanvas, isExpanding, presetById, previewFor, previewKey, requestPreview } from './expand';
 import { colorRange, heal, makeTip, maskToCanvas, unionRect } from './paint';
+import { ScaleTarget, cancelScalePreview, commitScale, isTextTarget, percentFor, previewScale, releaseScaleCache, scaleBox, scaleTarget } from './scale';
 import { EditorState, ToolId, activeDoc, editor, openPhotoInEditor, setOpts, syncDoc } from './session';
 import { getView, refit, setView, setViewExtent } from './viewState';
 
@@ -48,6 +49,8 @@ export interface Tool {
   key?: (e: KeyboardEvent, c: ToolCtx) => boolean;
   overlay?: (g: CanvasRenderingContext2D, c: ToolCtx) => void;
   deactivate?: (c: ToolCtx) => void;
+  /** The cursor depends on what's under the pointer, so it's asked again as the pointer moves. */
+  liveCursor?: boolean;
 }
 
 const toScreen = (v: View, x: number, y: number): [number, number] => [x * v.zoom + v.panX, y * v.zoom + v.panY];
@@ -691,6 +694,240 @@ const move: Tool = {
   },
 };
 
+// ---------------------------------------------------------------- scale
+// Handles around the active layer's content (or the selected pixels) resize it; dragging inside moves it.
+// Each drag is one undo step; the pixel work is in scale.ts.
+
+interface ScaleDrag {
+  target: ScaleTarget;
+  mode: 'move' | 'handle';
+  hx: number;
+  hy: number;
+  start: Rect;
+  sx: number;
+  sy: number;
+  box: Rect;
+  center: boolean;
+  cursor: string;
+  /** Document state at the start; anything else changing it (an undo, say) ends the drag. */
+  stamp: unknown[];
+}
+let scaleDrag: ScaleDrag | null = null;
+
+const scaleStamp = (doc: EditorDoc, t: ScaleTarget) => [doc.hIndex, doc.history.length, doc.layers.includes(t.layer), t.layer.canvas, t.layer.x, t.layer.y, doc.selection];
+const scaleStale = (doc: EditorDoc, d: ScaleDrag) => scaleStamp(doc, d.target).some((v, i) => v !== d.stamp[i]);
+
+/** The box being dragged, for the options bar (null between drags). */
+export const scaleUi = createStore<{ box: Rect | null }>({ box: null });
+
+const RESIZE_CURSOR: Record<string, string> = {
+  '-1,-1': 'nwse-resize',
+  '1,1': 'nwse-resize',
+  '1,-1': 'nesw-resize',
+  '-1,1': 'nesw-resize',
+  '-1,0': 'ew-resize',
+  '1,0': 'ew-resize',
+  '0,-1': 'ns-resize',
+  '0,1': 'ns-resize',
+};
+const SCALE_ACCENT = '#3d8bfd';
+
+/** What of box `r` is at document point (x, y): a handle (corners and edge middles, then anywhere along an edge), its inside, or nothing. */
+function scaleHit(r: Rect, x: number, y: number, zoom: number): { hx: number; hy: number } | 'inside' | null {
+  let best: { hx: number; hy: number } | null = null;
+  let bd = 7 / zoom;
+  for (const [hx, hy] of [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]]) {
+    const d = Math.max(Math.abs(x - (r.x + ((hx + 1) / 2) * r.w)), Math.abs(y - (r.y + ((hy + 1) / 2) * r.h)));
+    if (d < bd) {
+      bd = d;
+      best = { hx, hy };
+    }
+  }
+  if (best) return best;
+  const e = 4 / zoom;
+  const alongY = y > r.y - e && y < r.y + r.h + e;
+  const alongX = x > r.x - e && x < r.x + r.w + e;
+  if (alongY && Math.abs(x - r.x) <= e) return { hx: -1, hy: 0 };
+  if (alongY && Math.abs(x - r.x - r.w) <= e) return { hx: 1, hy: 0 };
+  if (alongX && Math.abs(y - r.y) <= e) return { hx: 0, hy: -1 };
+  if (alongX && Math.abs(y - r.y - r.h) <= e) return { hx: 0, hy: 1 };
+  return x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h ? 'inside' : null;
+}
+
+let scaleFrame = 0;
+
+/** Redraws the live preview once per frame (pointer moves can arrive several to a frame). */
+function scheduleScalePreview(doc: EditorDoc) {
+  if (scaleFrame) return;
+  scaleFrame = requestAnimationFrame(() => {
+    scaleFrame = 0;
+    const d = scaleDrag;
+    if (!d || scaleStale(doc, d)) return;
+    previewScale(doc, d.target, d.box);
+    scaleUi.set({ box: d.box });
+  });
+}
+
+function endScaleDrag(doc: EditorDoc) {
+  cancelAnimationFrame(scaleFrame);
+  scaleFrame = 0;
+  scaleDrag = null;
+  scaleUi.set({ box: null });
+  cancelScalePreview(doc);
+}
+
+const scaleTool: Tool = {
+  liveCursor: true,
+  cursor: (c) => {
+    if (scaleDrag) return scaleDrag.cursor;
+    const t = c.hover ? scaleTarget(c.doc).target : null;
+    if (!t || !c.hover) return 'default';
+    const h = scaleHit(t.box, c.hover.x, c.hover.y, c.view.zoom);
+    return h === 'inside' ? 'move' : h ? RESIZE_CURSOR[`${h.hx},${h.hy}`] : 'default';
+  },
+  down: (e, c) => {
+    const { doc } = c;
+    const { target: t, reason } = scaleTarget(doc);
+    const hit = t ? scaleHit(t.box, e.x, e.y, c.view.zoom) : null;
+    if (!t || !hit) {
+      // Clicking another layer's pixels makes it the one to scale.
+      const other = pickLayerAt(doc, e.x, e.y);
+      if (other && other.id !== doc.activeId) {
+        doc.activeId = other.id;
+        doc.editMask = false;
+        doc.emit();
+        c.redraw();
+      } else if (!t) toast(reason);
+      return;
+    }
+    if (t.layer.locked) return toast('This layer is locked');
+    const start = { ...t.box };
+    const handle = hit === 'inside' ? null : hit;
+    scaleDrag = {
+      target: t,
+      mode: handle ? 'handle' : 'move',
+      hx: handle?.hx ?? 0,
+      hy: handle?.hy ?? 0,
+      start,
+      sx: e.x,
+      sy: e.y,
+      box: start,
+      center: false,
+      cursor: handle ? RESIZE_CURSOR[`${handle.hx},${handle.hy}`] : 'move',
+      stamp: scaleStamp(doc, t),
+    };
+  },
+  move: (e, c) => {
+    const d = scaleDrag;
+    if (!d) return;
+    if (scaleStale(c.doc, d)) return endScaleDrag(c.doc);
+    const W = c.doc.width;
+    const H = c.doc.height;
+    const tol = SNAP / c.view.zoom;
+    const s = d.start;
+    if (d.mode === 'move') {
+      let x = s.x + e.x - d.sx;
+      let y = s.y + e.y - d.sy;
+      if (e.shift) {
+        if (Math.abs(x - s.x) > Math.abs(y - s.y)) y = s.y;
+        else x = s.x;
+      }
+      if (!e.mod) {
+        x = snapMove(x, s.w, W, tol);
+        y = snapMove(y, s.h, H, tol);
+      }
+      // By whole pixels, so a move never resamples.
+      d.box = { ...s, x: s.x + Math.round(x - s.x), y: s.y + Math.round(y - s.y) };
+    } else {
+      // Where the handle is now (keeping the offset from where it was grabbed), snapped to the canvas.
+      let px = s.x + ((d.hx + 1) / 2) * s.w + e.x - d.sx;
+      let py = s.y + ((d.hy + 1) / 2) * s.h + e.y - d.sy;
+      if (!e.mod) {
+        px = snapTo(px, [0, W / 2, W], tol);
+        py = snapTo(py, [0, H / 2, H], tol);
+      }
+      const lock = isTextTarget(d.target) || c.st.opts.scale.linked !== e.shift;
+      d.center = e.alt;
+      d.box = scaleBox(s, d.hx, d.hy, px, py, lock, e.alt);
+    }
+    scheduleScalePreview(c.doc);
+  },
+  up: (_e, c) => {
+    const d = scaleDrag;
+    if (!d) return;
+    // The fixed point of the box, as fractions; a re-rendered type layer is aligned to it.
+    const f = (h: number) => (d.mode === 'move' || d.center || !h ? 0.5 : h > 0 ? 0 : 1);
+    const stale = scaleStale(c.doc, d);
+    endScaleDrag(c.doc);
+    if (!stale) commitScale(c.doc, d.target, d.box, { x: f(d.hx), y: f(d.hy) });
+    c.redraw();
+  },
+  key: (e, c) => {
+    if (e.key !== 'Escape' || !scaleDrag) return false;
+    endScaleDrag(c.doc);
+    return true;
+  },
+  overlay: (g, c) => {
+    const d = scaleDrag && !scaleStale(c.doc, scaleDrag) ? scaleDrag : null;
+    const t = d ? d.target : scaleTarget(c.doc).target;
+    if (!t) return;
+    const v = c.view;
+    const r = d ? d.box : t.box;
+    const [x, y] = toScreen(v, r.x, r.y);
+    const w = r.w * v.zoom;
+    const h = r.h * v.zoom;
+    g.save();
+    if (d?.mode === 'handle') {
+      const [ox, oy] = toScreen(v, d.start.x, d.start.y);
+      g.strokeStyle = 'rgba(255,255,255,0.45)';
+      g.lineWidth = 1;
+      g.setLineDash([3, 3]);
+      g.strokeRect(Math.round(ox) + 0.5, Math.round(oy) + 0.5, Math.round(d.start.w * v.zoom), Math.round(d.start.h * v.zoom));
+      g.setLineDash([]);
+    }
+    const bx = Math.round(x) + 0.5;
+    const by = Math.round(y) + 0.5;
+    g.lineWidth = 3;
+    g.strokeStyle = 'rgba(0,0,0,0.45)';
+    g.strokeRect(bx, by, Math.round(w), Math.round(h));
+    g.lineWidth = 1;
+    g.strokeStyle = SCALE_ACCENT;
+    g.strokeRect(bx, by, Math.round(w), Math.round(h));
+    for (const fx of [0, 0.5, 1])
+      for (const fy of [0, 0.5, 1]) {
+        if (fx === 0.5 && fy === 0.5) continue;
+        const px = Math.round(x + w * fx);
+        const py = Math.round(y + h * fy);
+        g.fillStyle = '#fff';
+        g.fillRect(px - 4, py - 4, 8, 8);
+        g.strokeStyle = SCALE_ACCENT;
+        g.strokeRect(px - 3.5, py - 3.5, 7, 7);
+      }
+    if (d) {
+      const k = percentFor(t, r);
+      const pct = (n: number) => `${+(n * 100).toFixed(1)}%`;
+      const label = `${Math.round(r.w).toLocaleString()} × ${Math.round(r.h).toLocaleString()} px · ${Math.abs(k.x - k.y) < 0.0005 ? pct(k.x) : `${pct(k.x)} × ${pct(k.y)}`}`;
+      g.font = '600 11px system-ui';
+      const lw = g.measureText(label).width + 14;
+      const cw = g.canvas.clientWidth;
+      const ch = g.canvas.clientHeight;
+      const lx = Math.round(Math.min(cw - lw - 4, Math.max(4, x + w / 2 - lw / 2)));
+      const ly = Math.round(Math.min(ch - 24, Math.max(4, y - 30 > 4 ? y - 30 : y + h + 10)));
+      g.fillStyle = 'rgba(20,20,22,0.85)';
+      g.beginPath();
+      g.roundRect(lx, ly, lw, 20, 6);
+      g.fill();
+      g.fillStyle = '#fff';
+      g.fillText(label, lx + 7, ly + 14);
+    }
+    g.restore();
+  },
+  deactivate: (c) => {
+    if (scaleDrag) endScaleDrag(c.doc);
+    releaseScaleCache();
+  },
+};
+
 // ---------------------------------------------------------------- crop
 // The box may reach past the canvas: applying it then expands the canvas, and the crop options choose how the
 // new area is filled (see expand.ts). A size preset ("Expand to") also scales the result to its exact pixels.
@@ -1269,6 +1506,7 @@ const zoom: Tool = {
 
 export const TOOLS: Record<ToolId, Tool> = {
   move,
+  scale: scaleTool,
   marquee,
   lasso,
   wand,

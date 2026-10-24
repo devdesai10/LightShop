@@ -10,6 +10,7 @@ import { EditorView } from './editor/EditorView';
 import { editor, enterEditor, openFilesInEditor } from './editor/session';
 import { DialogHost } from './ui/dialogs';
 import { ErrorBoundary } from './ui/ErrorBoundary';
+import { TooltipHost } from './ui/Tooltip';
 import { preventPageZoom } from './lib/gestures';
 
 const MODULES: { id: Module; label: string; hint: string; icon: React.ReactNode }[] = [
@@ -179,6 +180,7 @@ export default function App() {
       <ImportProgress />
       <Toasts />
       <DialogHost />
+      <TooltipHost />
     </div>
   );
 }

@@ -29,7 +29,7 @@ const ALLOWED_PERMISSIONS = new Set(['clipboard-read', 'clipboard-sanitized-writ
 
 // Cmd/Ctrl shortcuts the web app handles itself (editor undo, copy/paste pixels, zoom, panels...).
 // While no text field is focused these go to the page instead of the native menu.
-const PAGE_SHORTCUT_KEYS = new Set(['z', 'y', 'a', 'c', 'x', 'v', 'd', 'n', 'o', 's', 'w', 'e', 'j', 'l', 'm', 'i', 'u', 'b', '0', '1', '=', '+', '-', 'backspace']);
+const PAGE_SHORTCUT_KEYS = new Set(['z', 'y', 'a', 'c', 'x', 'v', 'd', 'n', 'o', 's', 'w', 'e', 'j', 'l', 'm', 'i', 'u', 'b', 't', '0', '1', '=', '+', '-', 'backspace']);
 
 protocol.registerSchemesAsPrivileged([
   { scheme: SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true, codeCache: true } },

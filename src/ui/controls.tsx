@@ -1,5 +1,6 @@
 import { ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Star, X } from 'lucide-react';
+import { TipContent, TipSide, tipProps } from './Tooltip';
 
 export function cx(...c: (string | false | null | undefined)[]) {
   return c.filter(Boolean).join(' ');
@@ -151,6 +152,8 @@ export function IconButton({
   disabled,
   className,
   shortcut,
+  tip,
+  tipSide,
 }: {
   title: string;
   onClick?: (e: React.MouseEvent) => void;
@@ -159,15 +162,20 @@ export function IconButton({
   disabled?: boolean;
   className?: string;
   shortcut?: string;
+  /** A rich tooltip (name, shortcut keys, description) instead of the plain one. */
+  tip?: Partial<TipContent>;
+  tipSide?: TipSide;
 }) {
+  const rich = tip ? tipProps({ title: tip.title ?? title, keys: tip.keys ?? (shortcut ? [shortcut] : undefined), text: tip.text }, tipSide) : null;
   return (
     <button
       className={cx('icon-btn', active && 'active', className)}
-      title={shortcut ? `${title} (${shortcut})` : title}
+      title={rich ? undefined : shortcut ? `${title} (${shortcut})` : title}
       aria-label={title}
       aria-pressed={active}
       onClick={onClick}
       disabled={disabled}
+      {...rich}
     >
       {children}
     </button>

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  Brush, Crop, Eraser, FilePlus, FolderOpen, Hand, Lasso, Move, PaintBucket, Pipette, Bandage, Save, Shapes, SquareDashed, Stamp, Type, WandSparkles, X, ZoomIn, Blend,
+  Brush, Crop, Eraser, FilePlus, FolderOpen, Hand, Lasso, Move, PaintBucket, Pipette, Bandage, Save, Scaling, Shapes, SquareDashed, Stamp, Type, WandSparkles, X, ZoomIn, Blend,
 } from 'lucide-react';
 import { app, toast } from '../state/app';
 import { useEmitter } from '../state/store';
 import { checkerPattern, decodeImage, createCanvas, ctx2d } from '../lib/imageio';
-import { isTypingTarget, modKey, pickFiles } from '../lib/util';
+import { isMac, isTypingTarget, modKey, modLabel, pickFiles } from '../lib/util';
 import { Button, IconButton, cx } from '../ui/controls';
+import { tipProps } from '../ui/Tooltip';
 import { ADJ_LABELS, defaultAdjustment } from './adjust';
 import * as A from './actions';
 import { EditorDoc, TextProps, textFont } from './doc';
@@ -18,28 +19,33 @@ import { TOOLS, Tool, ToolCtx, ToolEvent, applyCrop, hand, hasPendingCrop, isMov
 import { dpr, fitView, getView, refit, setActualPixels, setView, setViewportSize, zoomBy } from './viewState';
 import { attachViewGestures } from '../lib/gestures';
 import { CropOptions, ExpandProgress } from './CropOptions';
+import { ScaleOptions } from './ScaleOptions';
 import { carryMoveTo, clearTabHover, drawDropPreview, dropMoveOnTab, hoverTab, layerDrag, rowDragLeave, rowDragOver, rowDrop, tabAt, tabDragProps } from './layerDrag';
 
-const TOOL_LIST: { id: ToolId; label: string; key: string; icon: React.ReactNode }[] = [
-  { id: 'move', label: 'Move', key: 'V', icon: <Move size={17} /> },
-  { id: 'marquee', label: 'Marquee', key: 'M', icon: <SquareDashed size={17} /> },
-  { id: 'lasso', label: 'Lasso', key: 'L', icon: <Lasso size={17} /> },
-  { id: 'wand', label: 'Magic Wand', key: 'W', icon: <WandSparkles size={17} /> },
-  { id: 'crop', label: 'Crop', key: 'C', icon: <Crop size={17} /> },
-  { id: 'eyedropper', label: 'Eyedropper', key: 'I', icon: <Pipette size={17} /> },
-  { id: 'heal', label: 'Spot Healing Brush', key: 'J', icon: <Bandage size={17} /> },
-  { id: 'brush', label: 'Brush', key: 'B', icon: <Brush size={17} /> },
-  { id: 'clone', label: 'Clone Stamp (Alt-click to set source)', key: 'S', icon: <Stamp size={17} /> },
-  { id: 'eraser', label: 'Eraser', key: 'E', icon: <Eraser size={17} /> },
-  { id: 'gradient', label: 'Gradient', key: 'G', icon: <Blend size={17} /> },
-  { id: 'bucket', label: 'Paint Bucket', key: '⇧G', icon: <PaintBucket size={17} /> },
-  { id: 'text', label: 'Type', key: 'T', icon: <Type size={17} /> },
-  { id: 'shape', label: 'Shape', key: 'U', icon: <Shapes size={17} /> },
-  { id: 'hand', label: 'Hand (hold Space)', key: 'H', icon: <Hand size={17} /> },
-  { id: 'zoom', label: 'Zoom (Alt-click to zoom out)', key: 'Z', icon: <ZoomIn size={17} /> },
+const ALT = isMac ? '⌥' : 'Alt';
+
+/** The toolbox, top to bottom: name, shortcut keys and what it does (shown when hovering). `sep` starts a group. */
+const TOOL_LIST: { id: ToolId; label: string; keys: string[]; tip: string; icon: React.ReactNode; sep?: boolean }[] = [
+  { id: 'move', label: 'Move', keys: ['V'], tip: "Drag to move the layer or the selected pixels. Drag onto another document's tab to copy it there.", icon: <Move size={17} /> },
+  { id: 'scale', label: 'Scale', keys: ['K', `${modLabel}T`], tip: `Drag a handle to resize the layer or the selected pixels. Shift frees the proportions; ${ALT} scales from the center.`, icon: <Scaling size={17} /> },
+  { id: 'marquee', label: 'Marquee', keys: ['M'], tip: `Drag to select a rectangle or an ellipse (⇧M switches). Shift adds to the selection; ${ALT} subtracts.`, icon: <SquareDashed size={17} /> },
+  { id: 'lasso', label: 'Lasso', keys: ['L'], tip: 'Drag to draw a freehand selection. ⇧L switches to straight sides (polygonal).', icon: <Lasso size={17} /> },
+  { id: 'wand', label: 'Magic Wand', keys: ['W'], tip: 'Click to select an area of similar color.', icon: <WandSparkles size={17} /> },
+  { id: 'crop', label: 'Crop', keys: ['C'], tip: 'Drag to crop. Drag past the edges, or pick a size, to expand the canvas.', icon: <Crop size={17} />, sep: true },
+  { id: 'eyedropper', label: 'Eyedropper', keys: ['I'], tip: `Click to pick the foreground color; ${ALT}-click picks the background color.`, icon: <Pipette size={17} /> },
+  { id: 'heal', label: 'Spot Healing Brush', keys: ['J'], tip: 'Paint over spots and blemishes to blend them into their surroundings.', icon: <Bandage size={17} />, sep: true },
+  { id: 'brush', label: 'Brush', keys: ['B'], tip: 'Paint with the foreground color. [ and ] change the size; 1 to 0 set the opacity.', icon: <Brush size={17} /> },
+  { id: 'clone', label: 'Clone Stamp', keys: ['S'], tip: `${ALT}-click to set the source, then paint to copy from it.`, icon: <Stamp size={17} /> },
+  { id: 'eraser', label: 'Eraser', keys: ['E'], tip: 'Erase to transparency. [ and ] change the size.', icon: <Eraser size={17} /> },
+  { id: 'gradient', label: 'Gradient', keys: ['G'], tip: 'Drag to draw a gradient from the foreground to the background color.', icon: <Blend size={17} /> },
+  { id: 'bucket', label: 'Paint Bucket', keys: ['⇧G'], tip: 'Click to fill an area of similar color with the foreground color.', icon: <PaintBucket size={17} /> },
+  { id: 'text', label: 'Type', keys: ['T'], tip: 'Click to add text, or click existing text to edit it.', icon: <Type size={17} />, sep: true },
+  { id: 'shape', label: 'Shape', keys: ['U'], tip: 'Drag to draw a rectangle, ellipse or line.', icon: <Shapes size={17} /> },
+  { id: 'hand', label: 'Hand', keys: ['H', 'Space'], tip: 'Drag to move around the image. Hold Space to use it with any tool.', icon: <Hand size={17} />, sep: true },
+  { id: 'zoom', label: 'Zoom', keys: ['Z'], tip: `Click to zoom in; ${ALT}-click zooms out.`, icon: <ZoomIn size={17} /> },
 ];
 
-const KEY_TOOLS: Record<string, ToolId> = { v: 'move', m: 'marquee', l: 'lasso', w: 'wand', c: 'crop', i: 'eyedropper', j: 'heal', b: 'brush', s: 'clone', e: 'eraser', g: 'gradient', t: 'text', u: 'shape', h: 'hand', z: 'zoom' };
+const KEY_TOOLS: Record<string, ToolId> = { v: 'move', k: 'scale', m: 'marquee', l: 'lasso', w: 'wand', c: 'crop', i: 'eyedropper', j: 'heal', b: 'brush', s: 'clone', e: 'eraser', g: 'gradient', t: 'text', u: 'shape', h: 'hand', z: 'zoom' };
 
 const setTool = selectTool;
 
@@ -52,21 +58,38 @@ function Toolbar() {
   const bgRef = useRef<HTMLInputElement>(null);
   return (
     <div className="toolbar" role="toolbar" aria-label="Tools">
-      {TOOL_LIST.map((t, i) => (
+      {TOOL_LIST.map((t) => (
         <span key={t.id} style={{ display: 'contents' }}>
-          {(i === 4 || i === 6 || i === 12 || i === 14) && <div className="tool-sep" />}
-          <IconButton title={t.label} shortcut={t.key} active={tool === t.id} onClick={() => setTool(t.id)}>
+          {t.sep && <div className="tool-sep" />}
+          <IconButton title={t.label} active={tool === t.id} onClick={() => setTool(t.id)} tip={{ keys: t.keys, text: t.tip }}>
             {t.icon}
           </IconButton>
         </span>
       ))}
       <div className="swatches">
-        <button className="sw fg" style={{ background: fg }} onClick={() => fgRef.current?.click()} aria-label="Foreground color" title="Foreground color" />
-        <button className="sw bg" style={{ background: bg }} onClick={() => bgRef.current?.click()} aria-label="Background color" title="Background color" />
-        <button className="swap" onClick={() => editor.set({ fg: bg, bg: fg })} title="Swap colors (X)" aria-label="Swap colors">
+        <button
+          className="sw fg"
+          style={{ background: fg }}
+          onClick={() => fgRef.current?.click()}
+          aria-label="Foreground color"
+          {...tipProps({ title: 'Foreground color', text: 'The brush, type, shapes and fills use it. Click to change it.' })}
+        />
+        <button
+          className="sw bg"
+          style={{ background: bg }}
+          onClick={() => bgRef.current?.click()}
+          aria-label="Background color"
+          {...tipProps({ title: 'Background color', text: 'Gradients run to it and shape outlines use it. Click to change it.' })}
+        />
+        <button className="swap" onClick={() => editor.set({ fg: bg, bg: fg })} aria-label="Swap colors" {...tipProps({ title: 'Swap colors', keys: ['X'] })}>
           ⇄
         </button>
-        <button className="reset" onClick={() => editor.set({ fg: '#000000', bg: '#ffffff' })} title="Default colors (D)" aria-label="Default colors" />
+        <button
+          className="reset"
+          onClick={() => editor.set({ fg: '#000000', bg: '#ffffff' })}
+          aria-label="Default colors"
+          {...tipProps({ title: 'Default colors', keys: ['D'], text: 'Black foreground, white background.' })}
+        />
         <input ref={fgRef} type="color" value={fg} onChange={(e) => editor.set({ fg: e.target.value })} style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 0, height: 0 }} tabIndex={-1} />
         <input ref={bgRef} type="color" value={bg} onChange={(e) => editor.set({ bg: e.target.value })} style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', width: 0, height: 0 }} tabIndex={-1} />
       </div>
@@ -238,6 +261,9 @@ function OptionsBar({ doc }: { doc: EditorDoc | null }) {
     case 'crop':
       body = <CropOptions doc={doc} />;
       break;
+    case 'scale':
+      body = <ScaleOptions doc={doc} />;
+      break;
     case 'move':
       body = (
         <>
@@ -263,7 +289,7 @@ function OptionsBar({ doc }: { doc: EditorDoc | null }) {
   }
   return (
     <div className="optionsbar" role="toolbar" aria-label="Tool options">
-      <strong style={{ minWidth: 90 }}>{TOOL_LIST.find((t) => t.id === tool)?.label.split(' (')[0]}</strong>
+      <strong style={{ minWidth: 90 }}>{TOOL_LIST.find((t) => t.id === tool)?.label}</strong>
       <div className="sep" />
       {body}
     </div>
@@ -490,10 +516,17 @@ function Viewport({ doc }: { doc: EditorDoc }) {
     schedule();
   };
   const lastClient = useRef({ x: 0, y: 0 });
+  const cursorRef = useRef(cursor);
+  cursorRef.current = cursor;
   const onMove = (e: React.PointerEvent) => {
     const ev = toEvent(e);
     hover.current = { x: ev.x, y: ev.y };
     lastClient.current = { x: e.clientX, y: e.clientY };
+    const live = spaceDown.current ? hand : TOOLS[editor.get().tool];
+    if (live.liveCursor) {
+      const c = live.cursor(ctxFor());
+      if (c !== cursorRef.current) setCursor(c);
+    }
     const t = dragging.current;
     if (t) {
       const coalesced = (e.nativeEvent as PointerEvent).getCoalescedEvents?.() ?? [];
@@ -656,6 +689,7 @@ function useEditorShortcuts(doc: EditorDoc | null) {
       }
       if (mod) {
         const map: Record<string, () => void> = {
+          t: () => doc && setTool('scale'),
           n: () => (e.shiftKey ? doc && A.newLayer(doc) : openDialog({ kind: 'new' })),
           o: async () => openFilesInEditor(await pickFiles('image/*,.psd', true)),
           s: () => doc && saveDocToLibrary(doc),

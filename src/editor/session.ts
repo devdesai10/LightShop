@@ -14,7 +14,7 @@ import type { ExpandFill } from './expand';
 import { refit } from './viewState';
 
 export type ToolId =
-  | 'move' | 'marquee' | 'lasso' | 'wand' | 'crop' | 'eyedropper' | 'heal' | 'brush' | 'clone' | 'eraser'
+  | 'move' | 'scale' | 'marquee' | 'lasso' | 'wand' | 'crop' | 'eyedropper' | 'heal' | 'brush' | 'clone' | 'eraser'
   | 'gradient' | 'bucket' | 'text' | 'shape' | 'hand' | 'zoom';
 
 export interface BrushOpts {
@@ -39,6 +39,8 @@ export interface ToolOptions {
   /** `fill` and `fillColor` cover the new area when the crop box reaches past the canvas. */
   crop: { aspect: number | null; fill: ExpandFill; fillColor: string };
   move: { autoSelect: boolean };
+  /** `linked`: handles keep the proportions (Shift does the opposite). */
+  scale: { linked: boolean };
 }
 
 export interface EditorState {
@@ -68,6 +70,7 @@ const DEFAULT_OPTS: ToolOptions = {
   shape: { type: 'rect', fill: true, strokeWidth: 0 },
   crop: { aspect: null, fill: 'content', fillColor: '#000000' },
   move: { autoSelect: false },
+  scale: { linked: true },
 };
 
 function loadOpts(): ToolOptions {

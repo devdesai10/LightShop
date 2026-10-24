@@ -9,6 +9,7 @@ import { EditorDoc } from './doc';
 import { FILTERS } from './filters';
 import { openDialog } from './Dialogs';
 import { closeDoc, editor, exportDoc, openFilesInEditor, saveDocToLibrary } from './session';
+import { selectTool } from './tools';
 import { fitView, zoomBy, setActualPixels } from './viewState';
 
 export type MenuItem = { label: string; sc?: string; run?: () => void; disabled?: boolean; sub?: MenuItem[] } | '-';
@@ -59,6 +60,7 @@ export function buildMenus(doc: EditorDoc | null): { label: string; items: MenuI
         { label: 'Fill with Foreground', sc: '⌥⌫', disabled: need, run: run((x) => A.fillSelection(x, editor.get().fg)) },
         { label: 'Fill with Background', sc: `${M}⌫`, disabled: need, run: run((x) => A.fillSelection(x, editor.get().bg)) },
         '-',
+        { label: 'Scale', sc: `${M}T`, disabled: need, run: () => selectTool('scale') },
         { label: 'Flip Layer Horizontal', disabled: need, run: run((x) => A.flipLayer(x, 'h')) },
         { label: 'Flip Layer Vertical', disabled: need, run: run((x) => A.flipLayer(x, 'v')) },
       ],

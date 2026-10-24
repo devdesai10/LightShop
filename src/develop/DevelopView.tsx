@@ -1019,16 +1019,44 @@ function DevelopWorkspace() {
           </div>
         </div>
         <div className="tool-strip" role="toolbar" aria-label="Develop tools">
-          <IconButton title="Crop & straighten" shortcut="R" active={tool === 'crop'} onClick={() => setTool('crop')}>
+          <IconButton
+            title="Crop & Straighten"
+            shortcut="R"
+            active={tool === 'crop'}
+            onClick={() => setTool('crop')}
+            tipSide="bottom"
+            tip={{ text: 'Crop, straighten, rotate and flip. Expand turns the photo into a wallpaper for another screen.' }}
+          >
             <Crop size={16} />
           </IconButton>
-          <IconButton title="Touch Up: heal, clone & red eye" shortcut="Q" active={tool === 'spots'} onClick={() => setTool('spots')}>
+          <IconButton
+            title="Touch Up"
+            shortcut="Q"
+            active={tool === 'spots'}
+            onClick={() => setTool('spots')}
+            tipSide="bottom"
+            tip={{ text: 'Heal, clone or fix red eye. Click a blemish, or paint over a larger area.' }}
+          >
             <Bandage size={16} />
           </IconButton>
-          <IconButton title="Masks: radial & linear gradients" shortcut="M" active={tool === 'masks'} onClick={() => setTool('masks')}>
+          <IconButton
+            title="Masks"
+            shortcut="M"
+            active={tool === 'masks'}
+            onClick={() => setTool('masks')}
+            tipSide="bottom"
+            tip={{ text: 'Radial and linear gradient masks, for adjusting part of the photo.' }}
+          >
             <Circle size={16} />
           </IconButton>
-          <IconButton title="White balance selector" shortcut="W" active={tool === 'wb'} onClick={() => setTool('wb')}>
+          <IconButton
+            title="White Balance Selector"
+            shortcut="W"
+            active={tool === 'wb'}
+            onClick={() => setTool('wb')}
+            tipSide="bottom"
+            tip={{ text: 'Click something that should be neutral gray to set the white balance.' }}
+          >
             <Pipette size={16} />
           </IconButton>
         </div>

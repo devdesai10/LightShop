@@ -2,7 +2,7 @@
 
 A photo library, non-destructive RAW-style developer and layered image editor in one app. It pairs a Lightroom-style **Library** and **Develop** module with a Photoshop-style **Editor**, and runs in the browser or as a macOS desktop app.
 
-**Current version: 2.4**. See [What's new](#whats-new).
+**Current version: 2.5**. See [What's new](#whats-new).
 
 Your photos stay on your computer: LightShop works offline and stores its catalog locally.
 
@@ -37,7 +37,8 @@ Your photos stay on your computer: LightShop works offline and stores its catalo
 
 ### Editor
 - Pixel, type and adjustment layers, with layer masks, opacity and 17 blend modes.
-- **Tools:** Move, Marquee, Lasso, Magic Wand, Crop, Eyedropper, Spot Healing Brush, Brush, Clone Stamp, Eraser, Gradient, Paint Bucket, Type, Shape, Hand and Zoom.
+- **Tools:** Move, Scale, Marquee, Lasso, Magic Wand, Crop, Eyedropper, Spot Healing Brush, Brush, Clone Stamp, Eraser, Gradient, Paint Bucket, Type, Shape, Hand and Zoom. Hover over a tool to see its name, its shortcut and what it does.
+- **Scale (K or ⌘T):** drag the handles around a layer, or around the selected pixels, to resize it. You can also type a percentage, or fit the layer inside the canvas or make it fill the canvas. Scaling a layer again starts from its original pixels, so it doesn't get blurrier each time. Type stays editable.
 - **Crop and expand:** the crop box can reach past the image to make the canvas bigger, for example to turn an iPhone wallpaper into a Mac wallpaper. **Expand to** sizes the result for a Mac display, a common desktop resolution or an iPhone. The new area can be filled with Content-Aware, Blurred Photo, Extend Edges, Mirror or a color, or left transparent. The fill goes on its own layer.
 - **Drag layers between documents:** drag with the Move tool, or drag a row in the Layers panel, onto another document's tab to copy the layer or selected pixels into that document.
 - **Adjustments:** 13 types, applied directly or as adjustment layers: Brightness/Contrast, Levels, Curves, Exposure, Hue/Saturation, Color Balance, Black & White, Photo Filter, Channel Mixer, Invert, Posterize, Threshold and Gradient Map.
@@ -109,11 +110,11 @@ src/
   editor/        Editor module: document model and undo history, tools, layers,
                  adjustments, filters, menus, Develop → Editor sync (session.ts),
                  crop Expand (expand.ts) and its fills (inpaint.ts, fillWorker.ts),
-                 dragging layers between documents (layerDrag.ts)
+                 dragging layers between documents (layerDrag.ts), Scale tool (scale.ts)
   lib/           Image decoding, EXIF, RAW previews, PSD, XMP presets, color math,
                  date labels and calendar math, trackpad gestures, IndexedDB
   state/         App store: catalog, photos, collections, presets
-  ui/            Shared controls, dialogs, export dialog, error boundary
+  ui/            Shared controls, dialogs, export dialog, error boundary, tool tooltips
 electron/        Desktop shell: main process and preload bridge
 scripts/         build-mac.mjs: packages the app, signs it and makes the DMG
 build/, public/  App icons and web manifest
@@ -135,6 +136,18 @@ build/, public/  App icons and web manifest
 - **Desktop app:** the Electron shell serves the built app from a private `app://` origin with a strict Content Security Policy. The page runs sandboxed with no Node.js access.
 
 ## What's new
+
+### 2.5: Scale tool and tool tooltips
+- **New Scale tool (K, or ⌘T in the desktop app):** it's second in the Editor's toolbox. Handles surround the active layer's pixels, or the selected pixels when there's a selection.
+  - Drag a corner to scale. The proportions stay the same unless you hold Shift, or turn off the link in the options bar.
+  - Drag an edge to scale from that side. Hold ⌥ to scale from the center.
+  - Drag inside the box to move the layer. Edges snap to the canvas edges and center; hold ⌘ to place freely.
+  - A label shows the size in pixels and percent while you drag. Each drag is one undo step, and Esc cancels a drag.
+- **Options bar:** type the width and height in percent (linked or separate), or use **Fit Canvas** (fit inside the canvas) or **Fill Canvas** (cover it). Both keep the proportions and center the layer. Handy for a photo dragged in from another document.
+- **No blur from rescaling:** scaling the same layer again resamples from its original pixels, so you can shrink it and enlarge it again without losing detail. Percentages stay relative to the original size.
+- **Type stays editable:** a type layer scales by its font size.
+- Click another layer's pixels outside the box to scale that layer instead. Edit → Scale opens the tool too.
+- **Tool tooltips:** hover over a tool in the Editor's toolbox to see its name, its keyboard shortcut and a line about what it does. After the first one appears, moving along the toolbox shows each one straight away. The color swatches and Develop's tool strip have them too, and they show when you move through the tools with the keyboard.
 
 ### 2.4: Expand the canvas and drag layers between documents
 - **Expand with the Crop tool (C):** drag the crop box past the edges of the image, or pick a size under **Expand to**, and press Enter. An iPhone wallpaper becomes a desktop one with the photo centred at full height and the sides filled in.
@@ -205,6 +218,8 @@ build/, public/  App icons and web manifest
 - The Editor works in 8 bits per channel.
 - PSD support covers 8-bit RGB and grayscale with pixel layers. Type and adjustment layers are saved as pixels.
 - Editor documents stay in memory until you choose **Save to Library**. LightShop warns before you quit with unsaved documents.
+- Layer masks don't move or scale with their layer. The Scale tool doesn't rotate or skew. Scaling selected pixels leaves the layer canvas-sized, and a layer scaled past 64 megapixels keeps only the part over the canvas.
+- In the browser version, ⌘T opens a new browser tab instead of the Scale tool; press K there.
 - Pinch zoom in Safari is handled but untested. The desktop app and Chromium browsers (Chrome, Brave, Edge) are tested.
 - Events are worked out from capture times only, not locations. Photos without an EXIF date use the file's modified time. Named events are stored as collections.
 - Content-Aware fills take a few seconds for a laptop-sized wallpaper and up to about 15 seconds at Pro Display XDR size (6016 × 3384) on an M1. Results above 24 megapixels are filled at a lower resolution and enlarged, and the Crop tool's largest result is 64 megapixels.
