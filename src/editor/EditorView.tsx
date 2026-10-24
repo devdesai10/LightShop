@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  Brush, Crop, Eraser, FilePlus, FolderOpen, Hand, Lasso, Move, PaintBucket, Pipette, Bandage, Save, Scaling, Shapes, SquareDashed, Stamp, Type, WandSparkles, X, ZoomIn, Blend,
+  Brush, Crop, Eraser, FilePlus, FolderOpen, Hand, ImageDown, Lasso, Move, PaintBucket, Pipette, Bandage, Save, Scaling, Shapes, SquareDashed, Stamp, Type, WandSparkles, X, ZoomIn, Blend,
 } from 'lucide-react';
 import { app, toast } from '../state/app';
 import { useEmitter } from '../state/store';
@@ -8,7 +8,7 @@ import { checkerPattern, decodeImage, createCanvas, ctx2d } from '../lib/imageio
 import { isMac, isTypingTarget, modKey, modLabel, pickFiles } from '../lib/util';
 import { Button, IconButton, cx } from '../ui/controls';
 import { tipProps } from '../ui/Tooltip';
-import { ADJ_LABELS, defaultAdjustment } from './adjust';
+import { defaultAdjustment } from './adjust';
 import * as A from './actions';
 import { EditorDoc, TextProps, textFont } from './doc';
 import { Dialogs, openDialog, ui } from './Dialogs';
@@ -20,6 +20,7 @@ import { dpr, fitView, getView, refit, setActualPixels, setView, setViewportSize
 import { attachViewGestures } from '../lib/gestures';
 import { CropOptions, ExpandProgress } from './CropOptions';
 import { ScaleOptions } from './ScaleOptions';
+import { QUICK_EXPORT_TIP, quickExport } from './exporting';
 import { carryMoveTo, clearTabHover, drawDropPreview, dropMoveOnTab, hoverTab, layerDrag, rowDragLeave, rowDragOver, rowDrop, tabAt, tabDragProps } from './layerDrag';
 
 const ALT = isMac ? '⌥' : 'Alt';
@@ -847,24 +848,19 @@ export function EditorView() {
           {doc && (
             <>
               <div className="row" style={{ padding: '8px 10px', borderBottom: '1px solid var(--line)' }}>
-                <Button small primary onClick={() => saveDocToLibrary(doc)} title="Save flattened image + layers back to the Library (⌘S)">
+                <Button
+                  small
+                  primary
+                  className="grow"
+                  onClick={() => saveDocToLibrary(doc)}
+                  tipSide="bottom"
+                  tip={{ title: 'Save to Library', keys: [`${modLabel}S`], text: 'Saves the flattened image to the Library, keeping its layers so you can carry on editing later.' }}
+                >
                   <Save size={13} /> Save to Library
                 </Button>
-                <select
-                  value=""
-                  onChange={(e) => {
-                    if (e.target.value) A.addAdjustmentLayer(doc, defaultAdjustment(e.target.value as keyof typeof ADJ_LABELS));
-                  }}
-                  aria-label="Add adjustment layer"
-                  style={{ flex: 1, minWidth: 0 }}
-                >
-                  <option value="">Adjustment…</option>
-                  {Object.entries(ADJ_LABELS).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
+                <Button small className="grow" onClick={() => quickExport(doc)} tipSide="bottom" tip={{ title: 'Quick Export', text: QUICK_EXPORT_TIP }}>
+                  <ImageDown size={13} /> Quick Export
+                </Button>
               </div>
               <PropertiesPanel doc={doc} />
               <LayersPanel doc={doc} key={doc.id} />

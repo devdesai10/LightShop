@@ -65,8 +65,13 @@ function Toasts() {
   return (
     <div className="toasts" role="status" aria-live="polite">
       {toasts.map((t) => (
-        <div key={t.id} className={cx('toast', t.kind)}>
+        <div key={t.id} className={cx('toast', t.kind, t.action && 'has-action')}>
           {t.text}
+          {t.action && (
+            <button className="toast-action" onClick={t.action.run}>
+              {t.action.label}
+            </button>
+          )}
         </div>
       ))}
     </div>

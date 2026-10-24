@@ -3,7 +3,7 @@
 import { createStore } from '../state/store';
 import { Photo, addGeneratedPhoto, app, getPhoto, loadPhotoImage, loadProject, toast } from '../state/app';
 import { canvasToBlob, createCanvas, ctx2d, decodeImage } from '../lib/imageio';
-import { baseName, downloadBlob, extOf } from '../lib/util';
+import { baseName, extOf } from '../lib/util';
 import { renderDeveloped } from '../develop/export';
 import { isEdited, normalizeSettings } from '../develop/settings';
 import { dev, flushDevelop } from '../develop/state';
@@ -460,7 +460,8 @@ export async function docFromProject(p: Project): Promise<EditorDoc> {
   return doc;
 }
 
-function hasTransparency(c: HTMLCanvasElement): boolean {
+/** Whether the image has (noticeably) transparent areas, judged on a small copy. */
+export function hasTransparency(c: HTMLCanvasElement): boolean {
   const k = Math.min(1, 256 / Math.max(c.width, c.height));
   const s = createCanvas(c.width * k, c.height * k);
   const ctx = ctx2d(s, true);
@@ -489,16 +490,4 @@ export async function saveDocToLibrary(doc: EditorDoc) {
   doc.emit();
   toast(`Saved "${photo.name}" to the Library`, 'success');
   return photo;
-}
-
-export async function exportDoc(doc: EditorDoc, format: 'png' | 'jpeg' | 'webp' | 'psd', quality = 0.92) {
-  if (format === 'psd') {
-    const { writePsd } = await import('../lib/psd');
-    const bytes = writePsd(doc);
-    downloadBlob(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'image/vnd.adobe.photoshop' }), `${doc.name}.psd`);
-    return;
-  }
-  const mime = { png: 'image/png', jpeg: 'image/jpeg', webp: 'image/webp' }[format];
-  const c = format === 'jpeg' ? doc.flatten('#ffffff') : doc.getComposite();
-  downloadBlob(await canvasToBlob(c, mime, quality), `${doc.name}.${format === 'jpeg' ? 'jpg' : format}`);
 }

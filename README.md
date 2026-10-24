@@ -2,7 +2,7 @@
 
 A photo library, non-destructive RAW-style developer and layered image editor in one app. It pairs a Lightroom-style **Library** and **Develop** module with a Photoshop-style **Editor**, and runs in the browser or as a macOS desktop app.
 
-**Current version: 2.5**. See [What's new](#whats-new).
+**Current version: 2.6**. See [What's new](#whats-new).
 
 Your photos stay on your computer: LightShop works offline and stores its catalog locally.
 
@@ -49,7 +49,7 @@ Your photos stay on your computer: LightShop works offline and stores its catalo
   - Develop Filter: the Develop adjustment panels applied to a layer, like Camera Raw Filter
 - **Image:** image size, canvas size, rotation and flips.
 - **Selections:** add, subtract or intersect them; feather, inverse, and load layer transparency.
-- **Files:** open and save Photoshop PSD files, and export PNG, JPEG or WebP.
+- **Files:** open and save Photoshop PSD files. **File → Export As** saves a PNG, JPEG, WebP or PSD file wherever you choose. **Quick Export** saves the image to Downloads in one click: a JPEG, or a PNG if it has transparent areas.
 - **Save to Library:** stores the flattened image and keeps the layers, so you can reopen and keep editing later.
 
 ### Develop → Editor
@@ -110,7 +110,8 @@ src/
   editor/        Editor module: document model and undo history, tools, layers,
                  adjustments, filters, menus, Develop → Editor sync (session.ts),
                  crop Expand (expand.ts) and its fills (inpaint.ts, fillWorker.ts),
-                 dragging layers between documents (layerDrag.ts), Scale tool (scale.ts)
+                 dragging layers between documents (layerDrag.ts), Scale tool (scale.ts),
+                 Export As and Quick Export (exporting.ts)
   lib/           Image decoding, EXIF, RAW previews, PSD, XMP presets, color math,
                  date labels and calendar math, trackpad gestures, IndexedDB
   state/         App store: catalog, photos, collections, presets
@@ -136,6 +137,13 @@ build/, public/  App icons and web manifest
 - **Desktop app:** the Electron shell serves the built app from a private `app://` origin with a strict Content Security Policy. The page runs sandboxed with no Node.js access.
 
 ## What's new
+
+### 2.6: Quick Export, and Export As asks where to save
+- **Quick Export:** a new button beside **Save to Library** at the top of the Editor's right column, and in the File menu. One click saves the image to your Downloads folder: a JPEG, or a PNG when the image has transparent areas. Exporting the same image again makes a new, numbered file instead of replacing the first.
+- **Fixed: File → Export As seemed to do nothing in the desktop app.** It saved straight into Downloads with no dialog and no message, and if macOS didn't let LightShop use Downloads, it failed without saying so. Each format (PNG, JPEG, WebP, Photoshop) now opens a Save dialog where you choose the name and folder. The next dialog opens in the folder you used last.
+- **Every export says where it went,** with a **Show in Finder** button. If LightShop isn't allowed to save in a folder, it tells you.
+- **Fixed:** moving the pointer diagonally from **Export As** down to **Photoshop (PSD)** could close the submenu on the way. Menus now wait a moment before switching to another submenu.
+- The **Adjustment…** menu at the top of the right column made room for Quick Export. Add adjustment layers with **+ Adjustment…** in the Layers panel, or **Layer → New Adjustment Layer**.
 
 ### 2.5: Scale tool and tool tooltips
 - **New Scale tool (K, or ⌘T in the desktop app):** it's second in the Editor's toolbox. Handles surround the active layer's pixels, or the selected pixels when there's a selection.

@@ -8,7 +8,8 @@ import * as A from './actions';
 import { EditorDoc } from './doc';
 import { FILTERS } from './filters';
 import { openDialog } from './Dialogs';
-import { closeDoc, editor, exportDoc, openFilesInEditor, saveDocToLibrary } from './session';
+import { closeDoc, editor, openFilesInEditor, saveDocToLibrary } from './session';
+import { exportAs, exportAsks, quickExport } from './exporting';
 import { selectTool } from './tools';
 import { fitView, zoomBy, setActualPixels } from './viewState';
 
@@ -22,6 +23,8 @@ export function buildMenus(doc: EditorDoc | null): { label: string; items: MenuI
   const need = !d;
   const run = (f: (doc: EditorDoc) => void) => () => d && f(d);
   const groups = [...new Set(FILTERS.map((f) => f.group))];
+  // In the desktop app each format opens a Save dialog first.
+  const ell = exportAsks() ? '…' : '';
   return [
     {
       label: 'File',
@@ -35,12 +38,13 @@ export function buildMenus(doc: EditorDoc | null): { label: string; items: MenuI
           label: 'Export As',
           disabled: need,
           sub: [
-            { label: 'PNG', run: run((x) => exportDoc(x, 'png')) },
-            { label: 'JPEG', run: run((x) => exportDoc(x, 'jpeg')) },
-            { label: 'WebP', run: run((x) => exportDoc(x, 'webp')) },
-            { label: 'Photoshop (PSD)', run: run((x) => exportDoc(x, 'psd')) },
+            { label: `PNG${ell}`, run: run((x) => exportAs(x, 'png')) },
+            { label: `JPEG${ell}`, run: run((x) => exportAs(x, 'jpeg')) },
+            { label: `WebP${ell}`, run: run((x) => exportAs(x, 'webp')) },
+            { label: `Photoshop (PSD)${ell}`, run: run((x) => exportAs(x, 'psd')) },
           ],
         },
+        { label: 'Quick Export', disabled: need, run: run((x) => quickExport(x)) },
         '-',
         { label: 'Close', sc: `${M}W`, disabled: need, run: run((x) => closeDoc(x.id)) },
       ],
@@ -170,21 +174,34 @@ const ADJ_SC: Partial<Record<AdjType, string>> = {
   invert: `${M}I`,
 };
 
+/** While a submenu is open, hovering another item switches after this long (ms), so the pointer can cross other items on its way into the submenu. */
+const SUBMENU_SWITCH_MS = 300;
+
 function MenuList({ items, onDone }: { items: MenuItem[]; onDone: () => void }) {
   const [openSub, setOpenSub] = useState<number | null>(null);
+  const timer = useRef(0);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const hover = (i: number, hasSub: boolean) => {
+    clearTimeout(timer.current);
+    const next = hasSub ? i : null;
+    // Entering the open submenu (or its item) also lands here, which cancels a pending switch.
+    if (openSub === null || openSub === next) setOpenSub(next);
+    else timer.current = window.setTimeout(() => setOpenSub(next), SUBMENU_SWITCH_MS);
+  };
   return (
     <div className="menu" role="menu">
       {items.map((it, i) =>
         it === '-' ? (
           <div key={i} className="menu-sep" role="separator" />
         ) : (
-          <div key={i} style={{ position: 'relative' }} onMouseEnter={() => setOpenSub(it.sub ? i : null)}>
+          <div key={i} style={{ position: 'relative' }} onMouseEnter={() => hover(i, !!it.sub)}>
             <button
               className={cx('menu-item', openSub === i && it.sub && 'open')}
               disabled={it.disabled}
               role="menuitem"
               aria-haspopup={it.sub ? 'menu' : undefined}
               onClick={() => {
+                clearTimeout(timer.current);
                 if (it.sub) return setOpenSub(i);
                 onDone();
                 it.run?.();

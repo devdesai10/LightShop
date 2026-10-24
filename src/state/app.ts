@@ -51,6 +51,8 @@ export interface Toast {
   id: string;
   text: string;
   kind: 'info' | 'error' | 'success';
+  /** A button on the toast, e.g. "Show in Finder". */
+  action?: { label: string; run: () => void };
 }
 
 export interface LibraryFilter {
@@ -153,8 +155,8 @@ export const app = createStore<AppState>({
 }
 
 // ---------------------------------------------------------------- toasts
-export function toast(text: string, kind: Toast['kind'] = 'info', ms = 3500) {
-  const t: Toast = { id: uid('t'), text, kind };
+export function toast(text: string, kind: Toast['kind'] = 'info', ms = 3500, action?: Toast['action']) {
+  const t: Toast = { id: uid('t'), text, kind, action };
   app.set((s) => ({ toasts: [...s.toasts, t] }));
   setTimeout(() => app.set((s) => ({ toasts: s.toasts.filter((x) => x.id !== t.id) })), ms);
 }

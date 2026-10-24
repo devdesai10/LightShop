@@ -190,6 +190,8 @@ export function Button({
   title,
   className,
   small,
+  tip,
+  tipSide,
 }: {
   children: ReactNode;
   onClick?: (e: React.MouseEvent) => void;
@@ -198,9 +200,18 @@ export function Button({
   title?: string;
   className?: string;
   small?: boolean;
+  /** A rich tooltip (name, shortcut keys, description) instead of the plain `title`. */
+  tip?: TipContent;
+  tipSide?: TipSide;
 }) {
   return (
-    <button className={cx('btn', primary && 'primary', small && 'small', className)} onClick={onClick} disabled={disabled} title={title}>
+    <button
+      className={cx('btn', primary && 'primary', small && 'small', className)}
+      onClick={onClick}
+      disabled={disabled}
+      title={tip ? undefined : title}
+      {...(tip ? tipProps(tip, tipSide) : null)}
+    >
       {children}
     </button>
   );
